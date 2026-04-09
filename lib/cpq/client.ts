@@ -227,33 +227,22 @@ export const configureConfiguration = async (
   request: ConfigureConfiguratorRequest,
   context: Record<string, unknown>,
 ): Promise<CpqApiEnvelope> => {
+  const configureSessionId = request.trimSessionIdBeforeConfigure
+    ? request.sessionId.split('~').pop() ?? request.sessionId
+    : request.sessionId;
+
   const body = {
-    SessionId: request.sessionId,
-    sessionId: request.sessionId,
-    ConfigChanges: [
+    sessionID: configureSessionId,
+    selections: [
       {
-        FeatureId: request.featureId,
-        FeatureID: request.featureId,
-        OptionId: request.optionId,
-        OptionID: request.optionId,
-        OptionValue: request.optionValue,
-        Value: request.optionValue,
-        featureId: request.featureId,
-        optionId: request.optionId,
-        optionValue: request.optionValue,
+        id: request.featureId,
+        value: request.optionValue,
       },
     ],
-    changes: [
-      {
-        featureId: request.featureId,
-        optionId: request.optionId,
-        optionValue: request.optionValue,
-      },
-    ],
-    ...context,
   };
 
-  const result = await post('Configure', body, '[cpq/configure]');
+  void context;
+  const result = await post('configure', body, '[cpq/configure]');
 
   if (!result.ok || !result.data) {
     throw new Error(

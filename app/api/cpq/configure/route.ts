@@ -20,10 +20,17 @@ const buildContext = (input?: Partial<BikeBuilderContext>) => ({
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as ConfigureConfiguratorRequest & { currentState?: NormalizedBikeBuilderState };
   const ruleset = body.ruleset ?? process.env.NEXT_PUBLIC_CPQ_RULESET ?? 'BBLV6_G-LineMY26';
+  const baseUrl = (
+    process.env.CPQ_BASE_URL ?? 'https://configurator.eu1.inforcloudsuite.com/api/v4/ProductConfiguratorUI.svc/json'
+  ).replace(/\/$/, '');
+  const finalConfigureUrl = `${baseUrl}/configure`;
+  const sessionIdForConfigure = body.trimSessionIdBeforeConfigure
+    ? body.sessionId.split('~').pop() ?? body.sessionId
+    : body.sessionId;
 
-  if (!body?.sessionId || !body.featureId || !body.optionId) {
+  if (!body?.sessionId || !body.featureId || body.optionValue === undefined) {
     return NextResponse.json(
-      { error: 'sessionId, featureId and optionId are required' },
+      { error: 'sessionId, featureId and optionValue are required' },
       { status: 400 },
     );
   }
@@ -34,21 +41,28 @@ export async function POST(req: NextRequest) {
     featureId: body.featureId,
     optionId: body.optionId,
     optionValue: body.optionValue,
+    trimSessionIdBeforeConfigure: body.trimSessionIdBeforeConfigure,
+    finalConfigureUrl,
     context,
   });
 
   if (process.env.CPQ_USE_MOCK === 'true') {
     const current = body.currentState ?? mockInitState(ruleset);
-    const normalized = mockConfigureState(current, body.featureId, body.optionId);
+    const selectedOptionId =
+      body.optionId ??
+      current.features
+        .find((feature) => feature.featureId === body.featureId)
+        ?.availableOptions.find((option) => option.value === body.optionValue)?.optionId ??
+      body.optionValue;
+    const normalized = mockConfigureState(current, body.featureId, selectedOptionId);
     return NextResponse.json({
       sessionId: normalized.sessionId,
       parsed: normalized,
       rawResponse: normalized.raw ?? normalized,
       requestBody: {
-        sessionId: body.sessionId,
-        featureId: body.featureId,
-        optionId: body.optionId,
-        optionValue: body.optionValue,
+        finalConfigureUrl,
+        sessionID: sessionIdForConfigure,
+        selections: [{ id: body.featureId, value: body.optionValue }],
       },
       callType: 'Configure',
     });
@@ -80,10 +94,9 @@ export async function POST(req: NextRequest) {
       parsed: parsedWithSession,
       rawResponse: cpqResponse,
       requestBody: {
-        sessionId: body.sessionId,
-        featureId: body.featureId,
-        optionId: body.optionId,
-        optionValue: body.optionValue,
+        finalConfigureUrl,
+        sessionID: sessionIdForConfigure,
+        selections: [{ id: body.featureId, value: body.optionValue }],
       },
       callType: 'Configure',
     });

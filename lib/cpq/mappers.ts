@@ -151,22 +151,19 @@ const buildFeatureCandidate = (screenOption: Record<string, unknown>, traversalI
   const options = selectableValues.map(optionFromSelectable);
 
   const exactMatchByValue = options.find((option) => option.value !== undefined && option.value === currentValue);
-  const exactMatchByOptionId = options.find((option) => option.optionId === currentValue);
   const exactMatchByNormalizedValue = options.find(
     (option) => normalizeText(option.value) && normalizeText(option.value) === normalizeText(currentValue),
   );
-  const exactMatch = exactMatchByValue ?? exactMatchByOptionId ?? exactMatchByNormalizedValue;
+  const exactMatch = exactMatchByValue ?? exactMatchByNormalizedValue;
   const fallbackOption = options.find((option) => option.isVisible !== false && option.isEnabled !== false);
   const selected = exactMatch ?? fallbackOption;
   const selectedMatchSource = exactMatchByValue
     ? 'screenOption.value === option.value'
-    : exactMatchByOptionId
-      ? 'screenOption.value === option.optionId'
-      : exactMatchByNormalizedValue
-        ? 'normalized screenOption.value === option.value'
-        : fallbackOption
-          ? 'fallback:first-visible-enabled'
-          : 'none';
+    : exactMatchByNormalizedValue
+      ? 'normalized screenOption.value === option.value'
+      : fallbackOption
+        ? 'fallback:first-visible-enabled'
+        : 'none';
   const selectedOptionId = selected?.optionId;
   const selectedOptions = options.map((option) => ({ ...option, selected: Boolean(selectedOptionId && option.optionId === selectedOptionId) }));
 
