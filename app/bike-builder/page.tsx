@@ -10,6 +10,14 @@ type RequestState = {
   error?: string;
 };
 
+type CpqRouteResponse = {
+  sessionId: string;
+  parsed: NormalizedBikeBuilderState;
+  rawResponse: unknown;
+  error?: string;
+  details?: string;
+};
+
 export default function BikeBuilderPage() {
   const [ruleset, setRuleset] = useState(defaultRuleset);
   const [accountCode, setAccountCode] = useState('A000');
@@ -28,12 +36,12 @@ export default function BikeBuilderPage() {
         body: JSON.stringify({ ruleset, context: { accountCode } }),
       });
 
-      const payload = (await res.json()) as NormalizedBikeBuilderState & { error?: string; details?: string };
+      const payload = (await res.json()) as CpqRouteResponse;
       if (!res.ok) {
         throw new Error(payload.details ?? payload.error ?? 'Failed to initialize configuration');
       }
 
-      setState(payload);
+      setState(payload.parsed);
       setRequestState({ loading: false });
     } catch (error) {
       setRequestState({
@@ -62,12 +70,12 @@ export default function BikeBuilderPage() {
         }),
       });
 
-      const payload = (await res.json()) as NormalizedBikeBuilderState & { error?: string; details?: string };
+      const payload = (await res.json()) as CpqRouteResponse;
       if (!res.ok) {
         throw new Error(payload.details ?? payload.error ?? 'Failed to configure selection');
       }
 
-      setState(payload);
+      setState(payload.parsed);
       setRequestState({ loading: false });
     } catch (error) {
       setRequestState({

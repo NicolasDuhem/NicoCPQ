@@ -21,7 +21,12 @@ export async function POST(req: NextRequest) {
   });
 
   if (process.env.CPQ_USE_MOCK === 'true') {
-    return NextResponse.json(mockInitState(ruleset));
+    const parsed = mockInitState(ruleset);
+    return NextResponse.json({
+      sessionId: parsed.sessionId,
+      parsed,
+      rawResponse: parsed.raw ?? parsed,
+    });
   }
 
   try {
@@ -33,7 +38,11 @@ export async function POST(req: NextRequest) {
       features: normalized.features.length,
     });
 
-    return NextResponse.json(normalized);
+    return NextResponse.json({
+      sessionId: normalized.sessionId,
+      parsed: normalized,
+      rawResponse: cpqResponse,
+    });
   } catch (error) {
     console.error('[cpq/init] failed', error);
     return NextResponse.json(

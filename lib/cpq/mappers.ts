@@ -20,12 +20,56 @@ const pick = (obj: Record<string, unknown>, ...keys: string[]): unknown => {
   return undefined;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+
+const flattenRecords = (value: unknown, matches: (key: string) => boolean): Record<string, unknown>[] => {
+  const results: Record<string, unknown>[] = [];
+  const queue: unknown[] = [value];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    const record = asRecord(current);
+    if (!record) continue;
+
+    for (const [key, child] of Object.entries(record)) {
+      if (matches(key) && Array.isArray(child)) {
+        results.push(...asArray(child));
+      }
+      queue.push(child);
+    }
+  }
+
+  return results;
+};
+
 export const mapCpqToNormalizedState = (
   payload: CpqApiEnvelope,
   ruleset: string,
 ): NormalizedBikeBuilderState => {
   const root = payload as Record<string, unknown>;
-  const featureRows = asArray(pick(root, 'features', 'FeatureList', 'optionFeatures'));
+  const pages = flattenRecords(root, (key) => key.toLowerCase() === 'pages');
+  const screens = flattenRecords(root, (key) => key.toLowerCase() === 'screens');
+  const screenOptions = flattenRecords(root, (key) => {
+    const normalized = key.toLowerCase();
+    return normalized === 'screenoptions' || normalized === 'options' || normalized === 'values';
+  });
+
+  const featureRowsFromPages = pages.flatMap((page) => asArray(pick(page, 'screens', 'Screens')));
+  const featureRowsFromScreens = [...featureRowsFromPages, ...screens].flatMap((screen) =>
+    asArray(pick(screen, 'screenOptions', 'options', 'values', 'Values', 'ScreenOptions')),
+  );
+
+  const featureRows = featureRowsFromScreens.length
+    ? featureRowsFromScreens
+    : asArray(pick(root, 'features', 'FeatureList', 'optionFeatures', 'screenOptions'));
 
   const features = featureRows.map((feature) => {
     const optionRows = asArray(pick(feature, 'availableOptions', 'options', 'Values'));
@@ -41,6 +85,9 @@ export const mapCpqToNormalizedState = (
         label: asString(pick(option, 'label', 'description', 'DisplayName', 'value')) ?? 'Unknown option',
         value: asString(pick(option, 'value', 'code')),
         isSelectable: (pick(option, 'isSelectable', 'enabled') as boolean | undefined) ?? true,
+        selected:
+          (pick(option, 'selected', 'isSelected') as boolean | undefined) ??
+          (selectedOptionId ? selectedOptionId === asString(pick(option, 'optionId', 'id', 'value', 'ValueId')) : false),
       })),
     };
   });
@@ -48,9 +95,13 @@ export const mapCpqToNormalizedState = (
   return {
     sessionId:
       asString(pick(root, 'sessionId', 'configurationId', 'SessionId')) ??
+      asString(pick(root, 'Session', 'session')) ??
       asString(pick(root, 'id')) ??
       'unknown-session',
     ruleset,
+    pages,
+    screens,
+    screenOptions,
     productDescription: asString(pick(root, 'productDescription', 'description', 'Description')),
     ipnCode: asString(pick(root, 'ipnCode', 'ipn', 'itemNumber', 'IPN')),
     configuredPrice: asNumber(pick(root, 'configuredPrice', 'price', 'netPrice', 'Price')),
