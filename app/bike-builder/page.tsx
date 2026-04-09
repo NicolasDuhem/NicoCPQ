@@ -9,7 +9,7 @@ type RequestState = {
 };
 
 type CallType = 'StartConfiguration' | 'Configure';
-type TraversalMode = 'sampler' | 'enumerator';
+type TraversalMode = 'sampler' | 'ui-hierarchical';
 type TraversalStatus = 'idle' | 'running' | 'paused' | 'stopped' | 'completed';
 
 type CpqRouteResponse = {
@@ -41,6 +41,13 @@ type CapturedOption = {
 type CapturedConfiguration = {
   sequence: number;
   timestamp: string;
+  traversalLevel: number;
+  traversalPath: TraversalStep[];
+  traversalPathKey: string;
+  parentPathKey: string;
+  changedFeatureId: string;
+  changedOptionId: string;
+  changedOptionValue?: string;
   ruleset: string;
   namespace: string;
   headerId: string;
@@ -50,12 +57,22 @@ type CapturedConfiguration = {
   ipn?: string;
   price?: number;
   selectedOptions: CapturedOption[];
+  dropdownOrderSnapshot: {
+    level: number;
+    featureId: string;
+    featureLabel: string;
+    selectedOptionId?: string;
+    selectedOptionLabel?: string;
+    selectedOptionValue?: string;
+  }[];
   signature: string;
   rawSnippet?: unknown;
 };
 
 type TraversalStep = {
+  featureLabel: string;
   featureId: string;
+  optionLabel: string;
   optionId: string;
   optionValue?: string;
 };
@@ -92,19 +109,24 @@ export default function BikeBuilderPage() {
   const [activeMode, setActiveMode] = useState<TraversalMode | null>(null);
   const [currentFeatureLabel, setCurrentFeatureLabel] = useState('-');
   const [currentOptionLabel, setCurrentOptionLabel] = useState('-');
+  const [currentTraversalLevel, setCurrentTraversalLevel] = useState(0);
+  const [currentTraversalPathLabel, setCurrentTraversalPathLabel] = useState('-');
+  const [currentTraversalDetailId, setCurrentTraversalDetailId] = useState('-');
+  const [currentTraversalSessionId, setCurrentTraversalSessionId] = useState('-');
   const [results, setResults] = useState<CapturedConfiguration[]>([]);
   const [delayMs, setDelayMs] = useState(5000);
+  const [maxDepth, setMaxDepth] = useState(3);
   const [maxResults, setMaxResults] = useState(150);
   const [maxConfigureCalls, setMaxConfigureCalls] = useState(1000);
   const [maxRuntimeMinutes, setMaxRuntimeMinutes] = useState(15);
   const [configureCallCount, setConfigureCallCount] = useState(0);
   const [debugIncludeHidden, setDebugIncludeHidden] = useState(false);
+  const [includeSelectedOption, setIncludeSelectedOption] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [expandedResultKeys, setExpandedResultKeys] = useState<Record<string, boolean>>({});
 
   const traversalControlRef = useRef({ stop: false, pause: false });
   const runStartRef = useRef<number | null>(null);
-  const resultSignaturesRef = useRef<Set<string>>(new Set());
   const configureCountRef = useRef(0);
 
   const visibleFeatures = state?.features ?? [];
@@ -162,13 +184,54 @@ export default function BikeBuilderPage() {
     return `${target.ruleset}::${selected.join('|')}`;
   };
 
-  const saveSnapshot = (nextState: NormalizedBikeBuilderState, activeDetailId: string, rawSnippet?: unknown) => {
+  const pathToKey = (path: TraversalStep[]) => path.map((step) => `${step.featureId}:${step.optionId}:${step.optionValue ?? ''}`).join(' > ');
+
+  const snapshotDropdownOrder = (nextState: NormalizedBikeBuilderState) =>
+    getTraversableFeatures(nextState, debugIncludeHidden).map((feature, index) => {
+      const selected = feature.availableOptions.find((option) => option.optionId === feature.selectedOptionId);
+      return {
+        level: index + 1,
+        featureId: feature.featureId,
+        featureLabel: feature.featureLabel,
+        selectedOptionId: feature.selectedOptionId,
+        selectedOptionLabel: selected?.label,
+        selectedOptionValue: selected?.value ?? feature.selectedValue,
+      };
+    });
+
+  const saveSnapshot = ({
+    nextState,
+    activeDetailId,
+    rawSnippet,
+    traversalLevel,
+    traversalPath,
+    parentPathKey,
+    changedFeatureId,
+    changedOptionId,
+    changedOptionValue,
+  }: {
+    nextState: NormalizedBikeBuilderState;
+    activeDetailId: string;
+    rawSnippet?: unknown;
+    traversalLevel: number;
+    traversalPath: TraversalStep[];
+    parentPathKey: string;
+    changedFeatureId: string;
+    changedOptionId: string;
+    changedOptionValue?: string;
+  }) => {
     const signature = signatureForState(nextState);
-    if (!debugIncludeHidden && resultSignaturesRef.current.has(signature)) return;
 
     const captured: CapturedConfiguration = {
       sequence: results.length + 1,
       timestamp: new Date().toISOString(),
+      traversalLevel,
+      traversalPath,
+      traversalPathKey: pathToKey(traversalPath),
+      parentPathKey,
+      changedFeatureId,
+      changedOptionId,
+      changedOptionValue,
       ruleset: target.ruleset,
       namespace: target.namespace,
       headerId: target.headerId,
@@ -178,11 +241,11 @@ export default function BikeBuilderPage() {
       ipn: nextState.ipnCode,
       price: nextState.configuredPrice,
       selectedOptions: getSelectedOptions(nextState),
+      dropdownOrderSnapshot: snapshotDropdownOrder(nextState),
       signature,
       rawSnippet,
     };
 
-    resultSignaturesRef.current.add(signature);
     setResults((prev) => [...prev, { ...captured, sequence: prev.length + 1 }]);
   };
 
@@ -316,10 +379,27 @@ export default function BikeBuilderPage() {
     return payload;
   };
 
+  const applyUiOptionChange = async ({
+    featureId,
+    optionId,
+    optionValue,
+    sourceStateOverride,
+  }: {
+    featureId: string;
+    optionId: string;
+    optionValue?: string;
+    sourceStateOverride?: NormalizedBikeBuilderState;
+  }) => {
+    const sourceState = sourceStateOverride ?? state;
+    if (!sourceState?.sessionId) {
+      throw new Error('No active session to configure.');
+    }
+    return configureSelection({ sourceState, featureId, optionId, optionValue });
+  };
+
   const changeOption = async (featureId: string, optionId: string, optionValue?: string) => {
-    if (!state?.sessionId) return;
     try {
-      await configureSelection({ sourceState: state, featureId, optionId, optionValue });
+      await applyUiOptionChange({ featureId, optionId, optionValue });
     } catch {
       // UI error state already set.
     }
@@ -352,7 +432,17 @@ export default function BikeBuilderPage() {
         });
 
         currentState = payload.parsed;
-        saveSnapshot(payload.parsed, currentDetailId, extractRawSnippet(payload.rawResponse));
+        saveSnapshot({
+          nextState: payload.parsed,
+          activeDetailId: currentDetailId,
+          rawSnippet: extractRawSnippet(payload.rawResponse),
+          traversalLevel: 1,
+          traversalPath: [{ featureId: feature.featureId, featureLabel: feature.featureLabel, optionId: option.optionId, optionLabel: option.label, optionValue: option.value }],
+          parentPathKey: '',
+          changedFeatureId: feature.featureId,
+          changedOptionId: option.optionId,
+          changedOptionValue: option.value,
+        });
       }
     }
   };
@@ -385,61 +475,89 @@ export default function BikeBuilderPage() {
     return { state: currentState, detail: freshDetailId };
   };
 
-  const runBoundedEnumerator = async (seedState: NormalizedBikeBuilderState) => {
-    const initialPath: TraversalStep[] = [];
+  const getTraversalOptionsForFeature = (feature: NormalizedBikeBuilderState['features'][number]) =>
+    feature.availableOptions.filter((option) => {
+      if (!debugIncludeHidden && !isOptionTraversable(option)) return false;
+      if (!includeSelectedOption && feature.selectedOptionId === option.optionId) return false;
+      return true;
+    });
 
-    const enumerate = async (path: TraversalStep[], currentState: NormalizedBikeBuilderState, currentDetailId: string): Promise<void> => {
+  const runUiHierarchicalTraversal = async () => {
+    const enumerate = async (pathPrefix: TraversalStep[], levelIndex: number): Promise<void> => {
+      if (traversalControlRef.current.stop || hasExceededRunLimits()) return;
+      if (levelIndex >= maxDepth) return;
+
+      const restoredBranch = await replayPathFromFreshStart(pathPrefix);
       if (traversalControlRef.current.stop || hasExceededRunLimits()) return;
 
-      const features = getTraversableFeatures(currentState, debugIncludeHidden);
-      const depth = path.length;
+      const features = getTraversableFeatures(restoredBranch.state, debugIncludeHidden);
+      const feature = features[levelIndex];
+      if (!feature) return;
 
-      if (depth >= features.length) {
-        saveSnapshot(currentState, currentDetailId, extractRawSnippet(lastRawResponse));
-        return;
-      }
-
-      const feature = features[depth];
-      const options = feature.availableOptions.filter(isOptionTraversable);
+      setCurrentTraversalLevel(levelIndex + 1);
       setCurrentFeatureLabel(feature.featureLabel);
+      setCurrentTraversalDetailId(restoredBranch.detail);
+      setCurrentTraversalSessionId(restoredBranch.state.sessionId ?? '-');
 
-      if (!options.length) {
-        saveSnapshot(currentState, currentDetailId, extractRawSnippet(lastRawResponse));
-        return;
-      }
-
+      const options = getTraversalOptionsForFeature(feature);
       for (const option of options) {
         if (traversalControlRef.current.stop || hasExceededRunLimits()) return;
-        setCurrentOptionLabel(option.label);
 
-        const branch = await replayPathFromFreshStart(path);
+        const branch = await replayPathFromFreshStart(pathPrefix);
         if (traversalControlRef.current.stop || hasExceededRunLimits()) return;
 
-        if (configureCountRef.current > 0) {
+        const branchFeatures = getTraversableFeatures(branch.state, debugIncludeHidden);
+        const branchFeature = branchFeatures[levelIndex];
+        if (!branchFeature) continue;
+
+        const branchOption = branchFeature.availableOptions.find((candidate) => candidate.optionId === option.optionId);
+        if (!branchOption) continue;
+        if (!includeSelectedOption && branchFeature.selectedOptionId === branchOption.optionId) continue;
+
+        setCurrentTraversalDetailId(branch.detail);
+        setCurrentTraversalSessionId(branch.state.sessionId ?? '-');
+        setCurrentOptionLabel(branchOption.label);
+        const nextPath = [
+          ...pathPrefix,
+          {
+            featureId: branchFeature.featureId,
+            featureLabel: branchFeature.featureLabel,
+            optionId: branchOption.optionId,
+            optionLabel: branchOption.label,
+            optionValue: branchOption.value,
+          },
+        ];
+        setCurrentTraversalPathLabel(pathToKey(nextPath) || '-');
+
+        if (configureCountRef.current > 0 || pathPrefix.length > 0) {
           const keepGoing = await sleepWithControl(delayMs);
           if (!keepGoing) return;
         }
 
-        const payload = await configureSelection({
-          sourceState: branch.state,
-          featureId: feature.featureId,
-          optionId: option.optionId,
-          optionValue: option.value,
+        const payload = await applyUiOptionChange({
+          sourceStateOverride: branch.state,
+          featureId: branchFeature.featureId,
+          optionId: branchOption.optionId,
+          optionValue: branchOption.value,
         });
 
-        const nextPath = [...path, { featureId: feature.featureId, optionId: option.optionId, optionValue: option.value }];
-        const updatedFeatures = getTraversableFeatures(payload.parsed, debugIncludeHidden);
+        saveSnapshot({
+          nextState: payload.parsed,
+          activeDetailId: branch.detail,
+          rawSnippet: extractRawSnippet(payload.rawResponse),
+          traversalLevel: levelIndex + 1,
+          traversalPath: nextPath,
+          parentPathKey: pathToKey(pathPrefix),
+          changedFeatureId: branchFeature.featureId,
+          changedOptionId: branchOption.optionId,
+          changedOptionValue: branchOption.value,
+        });
 
-        if (nextPath.length >= updatedFeatures.length) {
-          saveSnapshot(payload.parsed, branch.detail, extractRawSnippet(payload.rawResponse));
-          continue;
-        }
-
-        await enumerate(nextPath, payload.parsed, branch.detail);
+        await enumerate(nextPath, levelIndex + 1);
       }
     };
 
-    await enumerate(initialPath, seedState, detailId);
+    await enumerate([], 0);
   };
 
   const startTraversal = async (mode: TraversalMode) => {
@@ -461,11 +579,8 @@ export default function BikeBuilderPage() {
     setRequestState({ loading: false });
 
     try {
-      if (mode === 'sampler') {
-        await runSampler(state);
-      } else {
-        await runBoundedEnumerator(state);
-      }
+      if (mode === 'sampler') await runSampler(state);
+      if (mode === 'ui-hierarchical') await runUiHierarchicalTraversal();
 
       if (traversalControlRef.current.stop) {
         setTraversalStatus('stopped');
@@ -482,6 +597,10 @@ export default function BikeBuilderPage() {
       setActiveMode(null);
       setCurrentFeatureLabel('-');
       setCurrentOptionLabel('-');
+      setCurrentTraversalLevel(0);
+      setCurrentTraversalPathLabel('-');
+      setCurrentTraversalDetailId('-');
+      setCurrentTraversalSessionId('-');
     }
   };
 
@@ -504,7 +623,6 @@ export default function BikeBuilderPage() {
   const clearResults = () => {
     setResults([]);
     setExpandedResultKeys({});
-    resultSignaturesRef.current = new Set();
   };
 
   const exportResults = () => {
@@ -560,8 +678,8 @@ export default function BikeBuilderPage() {
             <button style={styles.button} onClick={() => void startTraversal('sampler')} disabled={!state || traversalStatus === 'running'}>
               Start sampler
             </button>
-            <button style={styles.button} onClick={() => void startTraversal('enumerator')} disabled={!state || traversalStatus === 'running'}>
-              Start bounded enumeration
+            <button style={styles.button} onClick={() => void startTraversal('ui-hierarchical')} disabled={!state || traversalStatus === 'running'}>
+              Start UI hierarchical traversal
             </button>
             <button style={styles.secondaryButton} onClick={pauseTraversal} disabled={traversalStatus !== 'running'}>
               Pause
@@ -583,6 +701,10 @@ export default function BikeBuilderPage() {
             <label style={styles.label}>
               Delay (ms)
               <input type="number" min={0} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value) || 0)} style={styles.input} />
+            </label>
+            <label style={styles.label}>
+              Max depth
+              <input type="number" min={1} value={maxDepth} onChange={(e) => setMaxDepth(Math.max(1, Number(e.target.value) || 1))} style={styles.input} />
             </label>
             <label style={styles.label}>
               Max results
@@ -612,15 +734,23 @@ export default function BikeBuilderPage() {
               <input type="checkbox" checked={debugIncludeHidden} onChange={(e) => setDebugIncludeHidden(e.target.checked)} />
               Include hidden/system features (debug)
             </label>
+            <label style={styles.checkboxLabel}>
+              <input type="checkbox" checked={includeSelectedOption} onChange={(e) => setIncludeSelectedOption(e.target.checked)} />
+              Include currently selected option
+            </label>
           </div>
           <div style={styles.statusRow}>
             <span style={styles.badge}>status: {traversalStatus}</span>
             <span style={styles.badge}>mode: {activeMode ?? '-'}</span>
+            <span style={styles.badge}>level: {currentTraversalLevel || '-'}</span>
             <span style={styles.badge}>feature: {currentFeatureLabel}</span>
             <span style={styles.badge}>option: {currentOptionLabel}</span>
+            <span style={styles.badge}>path: {currentTraversalPathLabel}</span>
             <span style={styles.badge}>results: {results.length}</span>
             <span style={styles.badge}>configure calls: {configureCallCount}</span>
             <span style={styles.badge}>elapsed: {(elapsedMs / 1000).toFixed(1)}s</span>
+            <span style={styles.badge}>detailId: {currentTraversalDetailId}</span>
+            <span style={styles.badge}>sessionId: {currentTraversalSessionId}</span>
           </div>
         </section>
 
