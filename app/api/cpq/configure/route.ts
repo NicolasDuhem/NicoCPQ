@@ -57,14 +57,27 @@ export async function POST(req: NextRequest) {
   try {
     const cpqResponse = await configureConfiguration(body, { context });
     const normalized = mapCpqToNormalizedState(cpqResponse, ruleset);
+    const parsedWithSession =
+      normalized.sessionId === 'unknown-session'
+        ? {
+            ...normalized,
+            sessionId: body.sessionId,
+            debug: {
+              ...normalized.debug,
+              sessionIdField: `${normalized.debug?.sessionIdField ?? 'unknown'} (fallback:request.sessionId)`,
+            },
+          }
+        : normalized;
     console.log('[cpq/configure] response', {
-      sessionId: normalized.sessionId,
-      features: normalized.features.length,
+      sessionId: parsedWithSession.sessionId,
+      features: parsedWithSession.features.length,
+      ipnCode: parsedWithSession.ipnCode,
+      ipnSource: parsedWithSession.debug?.ipnCodeSource,
     });
 
     return NextResponse.json({
-      sessionId: normalized.sessionId,
-      parsed: normalized,
+      sessionId: parsedWithSession.sessionId,
+      parsed: parsedWithSession,
       rawResponse: cpqResponse,
       requestBody: {
         sessionId: body.sessionId,

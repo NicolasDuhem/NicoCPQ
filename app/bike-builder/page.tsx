@@ -102,6 +102,10 @@ export default function BikeBuilderPage() {
   const [lastCallType, setLastCallType] = useState<CallType>('StartConfiguration');
   const [lastChangedFeatureId, setLastChangedFeatureId] = useState<string>('');
   const [lastChangedOptionId, setLastChangedOptionId] = useState<string>('');
+  const [lastChangedOptionValue, setLastChangedOptionValue] = useState<string>('');
+  const [lastSelectedBefore, setLastSelectedBefore] = useState<string>('');
+  const [lastSelectedAfter, setLastSelectedAfter] = useState<string>('');
+  const [lastSelectedMatchSource, setLastSelectedMatchSource] = useState<string>('');
   const [lastRawRequest, setLastRawRequest] = useState<unknown>(null);
   const [lastRawResponse, setLastRawResponse] = useState<unknown>(null);
 
@@ -312,6 +316,10 @@ export default function BikeBuilderPage() {
     setLastCallType('StartConfiguration');
     setLastChangedFeatureId('');
     setLastChangedOptionId('');
+    setLastChangedOptionValue('');
+    setLastSelectedBefore('');
+    setLastSelectedAfter('');
+    setLastSelectedMatchSource('');
     setLastRawRequest(payload.requestBody ?? requestBody);
     setLastRawResponse(payload.rawResponse);
     setRequestState({ loading: false });
@@ -341,6 +349,8 @@ export default function BikeBuilderPage() {
   }): Promise<CpqRouteResponse> => {
     setRequestState({ loading: true });
     setActiveFeatureId(featureId);
+    const sourceFeature = sourceState.features.find((feature) => feature.featureId === featureId);
+    const selectedBefore = sourceFeature?.availableOptions.find((option) => option.optionId === sourceFeature.selectedOptionId);
 
     const requestBody = {
       sessionId: sourceState.sessionId,
@@ -371,6 +381,12 @@ export default function BikeBuilderPage() {
     setLastCallType('Configure');
     setLastChangedFeatureId(featureId);
     setLastChangedOptionId(optionId);
+    setLastChangedOptionValue(optionValue ?? '');
+    setLastSelectedBefore(selectedBefore?.label ?? sourceFeature?.selectedOptionId ?? '');
+    const updatedFeature = payload.parsed.features.find((feature) => feature.featureId === featureId);
+    const selectedAfter = updatedFeature?.availableOptions.find((option) => option.optionId === updatedFeature.selectedOptionId);
+    setLastSelectedAfter(selectedAfter?.label ?? updatedFeature?.selectedOptionId ?? '');
+    setLastSelectedMatchSource(updatedFeature?.selectedMatchSource ?? '');
     setLastRawRequest(payload.requestBody ?? requestBody);
     setLastRawResponse(payload.rawResponse);
     setRequestState({ loading: false });
@@ -790,7 +806,7 @@ export default function BikeBuilderPage() {
                 <strong>Description:</strong> {state?.productDescription ?? '-'}
               </div>
               <div>
-                <strong>IPN:</strong> {state?.ipnCode ?? '-'}
+                <strong>IPN Code:</strong> {state?.ipnCode ?? '-'}
               </div>
               <div>
                 <strong>Price:</strong> {summaryPrice}
@@ -827,7 +843,7 @@ export default function BikeBuilderPage() {
                     </div>
                     <div style={styles.resultMeta}>Detail: {result.detailId}</div>
                     <div style={styles.resultMeta}>Session: {result.sessionId}</div>
-                    <div style={styles.resultMeta}>IPN: {result.ipn ?? '-'}</div>
+                    <div style={styles.resultMeta}>IPN Code: {result.ipn ?? '-'}</div>
                     <div style={styles.resultMeta}>Price: {typeof result.price === 'number' ? result.price : '-'}</div>
                     <button
                       style={styles.inlineButton}
@@ -850,6 +866,13 @@ export default function BikeBuilderPage() {
                   <li>lastCallType: {lastCallType}</li>
                   <li>lastChangedFeatureId: {lastChangedFeatureId || '-'}</li>
                   <li>lastChangedOptionId: {lastChangedOptionId || '-'}</li>
+                  <li>lastChangedOptionValue: {lastChangedOptionValue || '-'}</li>
+                  <li>selected option before change: {lastSelectedBefore || '-'}</li>
+                  <li>selected option after Configure: {lastSelectedAfter || '-'}</li>
+                  <li>matched selected option source: {lastSelectedMatchSource || '-'}</li>
+                  <li>sessionId used for Configure: {(lastRawRequest as { sessionId?: string } | null)?.sessionId ?? '-'}</li>
+                  <li>extracted IPN Code: {state?.ipnCode ?? '-'}</li>
+                  <li>IPN source: {state?.debug?.ipnCodeSource ?? '-'}</li>
                   <li>sessionId source: {state?.debug?.sessionIdField ?? '-'}</li>
                   <li>raw feature count: {state?.debug?.rawFeatureCount ?? 0}</li>
                   <li>deduped feature count: {state?.debug?.dedupedFeatureCount ?? 0}</li>
@@ -863,6 +886,10 @@ export default function BikeBuilderPage() {
                 <details>
                   <summary>StartConfiguration / Configure response debug</summary>
                   <pre style={styles.pre}>{JSON.stringify(lastRawResponse, null, 2)}</pre>
+                </details>
+                <details>
+                  <summary>Configure IPN snippet</summary>
+                  <pre style={styles.pre}>{JSON.stringify(state?.debug?.ipnCodeSnippet ?? null, null, 2)}</pre>
                 </details>
                 <details>
                   <summary>Parsed feature diagnostics</summary>

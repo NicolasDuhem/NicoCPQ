@@ -24,6 +24,8 @@ const pick = (obj: Record<string, unknown>, ...keys: string[]): unknown => {
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 
+const normalizeText = (value: string | undefined): string | undefined => value?.trim().toLowerCase();
+
 const flattenRecords = (value: unknown, matches: (key: string) => boolean): Record<string, unknown>[] => {
   const results: Record<string, unknown>[] = [];
   const queue: unknown[] = [value];
@@ -108,12 +110,18 @@ type CandidateFeature = BikeBuilderFeature & {
   traversalIndex: number;
 };
 
+type IpnExtractionResult = {
+  ipnCode?: string;
+  source?: string;
+  snippet?: unknown;
+};
+
 const optionFromSelectable = (selectable: Record<string, unknown>): BikeBuilderFeatureOption => {
   const customProperties = toCustomProperties(pick(selectable, 'CustomProperties', 'customProperties'));
 
   return {
     optionId:
-      customProperties.OptionID ?? asString(pick(selectable, 'OptionID', 'optionId', 'Id', 'ID', 'Value')) ?? 'unknown-option',
+      customProperties.OptionID ?? asString(pick(selectable, 'OptionID', 'optionId', 'Value', 'value', 'Id', 'ID')) ?? 'unknown-option',
     label: asString(pick(selectable, 'Caption', 'caption', 'Name', 'name', 'Value', 'value')) ?? 'Unknown option',
     value: asString(pick(selectable, 'Value', 'value')),
     isSelectable: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
@@ -138,13 +146,27 @@ const optionFromSelectable = (selectable: Record<string, unknown>): BikeBuilderF
 
 const buildFeatureCandidate = (screenOption: Record<string, unknown>, traversalIndex: number): CandidateFeature => {
   const selectableValues = asArray(pick(screenOption, 'SelectableValues', 'selectableValues', 'Values', 'values'));
-  const currentValue = asString(pick(screenOption, 'Value', 'value'));
+  const currentValue = asString(pick(screenOption, 'CurrentValue', 'currentValue', 'SelectedValue', 'selectedValue', 'Value', 'value'));
   const screenCustomProps = toCustomProperties(pick(screenOption, 'CustomProperties', 'customProperties'));
   const options = selectableValues.map(optionFromSelectable);
 
-  const exactMatch = options.find((option) => option.value !== undefined && option.value === currentValue);
+  const exactMatchByValue = options.find((option) => option.value !== undefined && option.value === currentValue);
+  const exactMatchByOptionId = options.find((option) => option.optionId === currentValue);
+  const exactMatchByNormalizedValue = options.find(
+    (option) => normalizeText(option.value) && normalizeText(option.value) === normalizeText(currentValue),
+  );
+  const exactMatch = exactMatchByValue ?? exactMatchByOptionId ?? exactMatchByNormalizedValue;
   const fallbackOption = options.find((option) => option.isVisible !== false && option.isEnabled !== false);
   const selected = exactMatch ?? fallbackOption;
+  const selectedMatchSource = exactMatchByValue
+    ? 'screenOption.value === option.value'
+    : exactMatchByOptionId
+      ? 'screenOption.value === option.optionId'
+      : exactMatchByNormalizedValue
+        ? 'normalized screenOption.value === option.value'
+        : fallbackOption
+          ? 'fallback:first-visible-enabled'
+          : 'none';
   const selectedOptionId = selected?.optionId;
   const selectedOptions = options.map((option) => ({ ...option, selected: Boolean(selectedOptionId && option.optionId === selectedOptionId) }));
 
@@ -162,12 +184,63 @@ const buildFeatureCandidate = (screenOption: Record<string, unknown>, traversalI
     featureSequence: firstMetadata?.FeatureSequence,
     selectedOptionId,
     selectedValue: selected?.value,
+    selectedMatchSource,
     currentValue,
     displayType: asString(pick(screenOption, 'DisplayType', 'displayType')),
     isVisible: asBoolean(pick(screenOption, 'IsVisible', 'isVisible')) ?? true,
     isEnabled: asBoolean(pick(screenOption, 'IsEnabled', 'isEnabled')) ?? true,
     availableOptions: selectedOptions,
   };
+};
+
+const findIpnCode = (root: Record<string, unknown>): IpnExtractionResult => {
+  const directCandidates: Array<[string, unknown]> = [
+    ['root.IPNCode', pick(root, 'IPNCode', 'ipnCode', 'IPN', 'ipn', 'ItemNumber', 'itemNumber')],
+  ];
+
+  for (const [source, value] of directCandidates) {
+    const code = asString(value);
+    if (code) return { ipnCode: code, source, snippet: { value: code } };
+  }
+
+  const queue: Array<{ path: string; value: unknown }> = [{ path: 'root', value: root }];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    if (Array.isArray(current.value)) {
+      current.value.forEach((child, idx) => queue.push({ path: `${current.path}[${idx}]`, value: child }));
+      continue;
+    }
+
+    const record = asRecord(current.value);
+    if (!record) continue;
+
+    const caption = asString(pick(record, 'Caption', 'caption', 'Name', 'name', 'Label', 'label'));
+    const normalizedCaption = normalizeText(caption);
+    const valueCandidate = asString(pick(record, 'Value', 'value', 'CurrentValue', 'currentValue', 'DisplayValue', 'displayValue'));
+    if (normalizedCaption === 'ipn code' && valueCandidate) {
+      return {
+        ipnCode: valueCandidate,
+        source: `${current.path}.${caption ? 'Caption=IPN Code' : 'name=IPN Code'}`,
+        snippet: { Caption: caption, Value: valueCandidate, path: current.path },
+      };
+    }
+
+    for (const [key, val] of Object.entries(record)) {
+      const normalizedKey = key.toLowerCase();
+      if ((normalizedKey === 'ipncode' || normalizedKey === 'ipn') && typeof val === 'string' && val.trim()) {
+        return {
+          ipnCode: val,
+          source: `${current.path}.${key}`,
+          snippet: { [key]: val, path: current.path },
+        };
+      }
+      queue.push({ path: `${current.path}.${key}`, value: val });
+    }
+  }
+
+  return {};
 };
 
 const scoreFeatureCandidate = (feature: CandidateFeature): [number, number, number] => {
@@ -236,6 +309,7 @@ export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string
   const { deduped, hiddenOrSystem } = dedupeFeatureCandidates(rawCandidates);
   const visibleFeatures = deduped.filter((feature) => feature.isVisible !== false);
   const session = findSessionId(root);
+  const ipn = findIpnCode(root);
 
   return {
     sessionId: session.value ?? 'unknown-session',
@@ -244,7 +318,7 @@ export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string
     screens,
     screenOptions,
     productDescription: asString(pick(root, 'productDescription', 'description', 'Description')),
-    ipnCode: asString(pick(root, 'ipnCode', 'ipn', 'itemNumber', 'IPN')),
+    ipnCode: ipn.ipnCode ?? asString(pick(root, 'ipnCode', 'ipn', 'itemNumber', 'IPN')),
     configuredPrice: asNumber(pick(root, 'configuredPrice', 'price', 'netPrice', 'Price')),
     totalWeight: asNumber(pick(root, 'totalWeight', 'weight', 'Weight')),
     bikeImageUrl: asString(pick(root, 'bikeImageUrl', 'imageUrl', 'ImageUrl')),
@@ -257,6 +331,8 @@ export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string
       dedupedFeatureCount: deduped.length,
       visibleFeatureCount: visibleFeatures.length,
       hiddenFeatureCount: hiddenOrSystem.length,
+      ipnCodeSource: ipn.source,
+      ipnCodeSnippet: ipn.snippet,
     },
     raw: payload,
   };

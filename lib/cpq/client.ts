@@ -233,8 +233,11 @@ export const configureConfiguration = async (
     ConfigChanges: [
       {
         FeatureId: request.featureId,
+        FeatureID: request.featureId,
         OptionId: request.optionId,
+        OptionID: request.optionId,
         OptionValue: request.optionValue,
+        Value: request.optionValue,
         featureId: request.featureId,
         optionId: request.optionId,
         optionValue: request.optionValue,

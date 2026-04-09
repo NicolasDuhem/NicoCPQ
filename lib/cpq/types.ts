@@ -38,6 +38,7 @@ export type BikeBuilderFeature = {
   featureSequence?: number;
   selectedOptionId?: string;
   selectedValue?: string;
+  selectedMatchSource?: string;
   currentValue?: string;
   displayType?: string;
   isVisible?: boolean;
@@ -51,6 +52,8 @@ export type CpqParsingDebug = {
   dedupedFeatureCount: number;
   visibleFeatureCount: number;
   hiddenFeatureCount: number;
+  ipnCodeSource?: string;
+  ipnCodeSnippet?: unknown;
 };
 
 export type NormalizedBikeBuilderState = {
