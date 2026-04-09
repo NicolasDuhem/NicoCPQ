@@ -108,6 +108,12 @@ export default function BikeBuilderPage() {
   const [lastSelectedMatchSource, setLastSelectedMatchSource] = useState<string>('');
   const [lastRawRequest, setLastRawRequest] = useState<unknown>(null);
   const [lastRawResponse, setLastRawResponse] = useState<unknown>(null);
+  const [lastConfigureUrl, setLastConfigureUrl] = useState<string>('');
+  const [lastConfigureSelectionCount, setLastConfigureSelectionCount] = useState<number>(0);
+  const [lastSessionIdSent, setLastSessionIdSent] = useState<string>('');
+  const [lastPreviousFeatureCurrentValue, setLastPreviousFeatureCurrentValue] = useState<string>('');
+  const [lastRequestedOptionValue, setLastRequestedOptionValue] = useState<string>('');
+  const [lastReturnedFeatureCurrentValue, setLastReturnedFeatureCurrentValue] = useState<string>('');
 
   const [traversalStatus, setTraversalStatus] = useState<TraversalStatus>('idle');
   const [activeMode, setActiveMode] = useState<TraversalMode | null>(null);
@@ -126,6 +132,7 @@ export default function BikeBuilderPage() {
   const [configureCallCount, setConfigureCallCount] = useState(0);
   const [debugIncludeHidden, setDebugIncludeHidden] = useState(false);
   const [includeSelectedOption, setIncludeSelectedOption] = useState(false);
+  const [trimSessionIdBeforeConfigure, setTrimSessionIdBeforeConfigure] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [expandedResultKeys, setExpandedResultKeys] = useState<Record<string, boolean>>({});
 
@@ -322,6 +329,12 @@ export default function BikeBuilderPage() {
     setLastSelectedMatchSource('');
     setLastRawRequest(payload.requestBody ?? requestBody);
     setLastRawResponse(payload.rawResponse);
+    setLastConfigureUrl('');
+    setLastConfigureSelectionCount(0);
+    setLastSessionIdSent('');
+    setLastPreviousFeatureCurrentValue('');
+    setLastRequestedOptionValue('');
+    setLastReturnedFeatureCurrentValue('');
     setRequestState({ loading: false });
     return payload;
   };
@@ -358,6 +371,7 @@ export default function BikeBuilderPage() {
       featureId,
       optionId,
       optionValue,
+      trimSessionIdBeforeConfigure,
       context: { accountCode },
     };
 
@@ -389,6 +403,13 @@ export default function BikeBuilderPage() {
     setLastSelectedMatchSource(updatedFeature?.selectedMatchSource ?? '');
     setLastRawRequest(payload.requestBody ?? requestBody);
     setLastRawResponse(payload.rawResponse);
+    const debugRequest = payload.requestBody as { finalConfigureUrl?: string; sessionID?: string; selections?: unknown[] } | undefined;
+    setLastConfigureUrl(debugRequest?.finalConfigureUrl ?? '');
+    setLastSessionIdSent(debugRequest?.sessionID ?? '');
+    setLastConfigureSelectionCount(Array.isArray(debugRequest?.selections) ? debugRequest.selections.length : 0);
+    setLastPreviousFeatureCurrentValue(sourceFeature?.currentValue ?? '');
+    setLastRequestedOptionValue(optionValue ?? '');
+    setLastReturnedFeatureCurrentValue(updatedFeature?.currentValue ?? '');
     setRequestState({ loading: false });
     setActiveFeatureId(null);
 
@@ -754,6 +775,14 @@ export default function BikeBuilderPage() {
               <input type="checkbox" checked={includeSelectedOption} onChange={(e) => setIncludeSelectedOption(e.target.checked)} />
               Include currently selected option
             </label>
+            <label style={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={trimSessionIdBeforeConfigure}
+                onChange={(e) => setTrimSessionIdBeforeConfigure(e.target.checked)}
+              />
+              Trim session ID before Configure
+            </label>
           </div>
           <div style={styles.statusRow}>
             <span style={styles.badge}>status: {traversalStatus}</span>
@@ -867,10 +896,24 @@ export default function BikeBuilderPage() {
                   <li>lastChangedFeatureId: {lastChangedFeatureId || '-'}</li>
                   <li>lastChangedOptionId: {lastChangedOptionId || '-'}</li>
                   <li>lastChangedOptionValue: {lastChangedOptionValue || '-'}</li>
+                  <li>final Configure URL: {lastConfigureUrl || '-'}</li>
+                  <li>sessionID sent: {lastSessionIdSent || '-'}</li>
+                  <li>changed feature id: {lastChangedFeatureId || '-'}</li>
+                  <li>changed option id (local UI stable id): {lastChangedOptionId || '-'}</li>
+                  <li>changed option value sent to CPQ: {lastChangedOptionValue || '-'}</li>
+                  <li>number of selections sent: {lastConfigureSelectionCount}</li>
                   <li>selected option before change: {lastSelectedBefore || '-'}</li>
                   <li>selected option after Configure: {lastSelectedAfter || '-'}</li>
                   <li>matched selected option source: {lastSelectedMatchSource || '-'}</li>
-                  <li>sessionId used for Configure: {(lastRawRequest as { sessionId?: string } | null)?.sessionId ?? '-'}</li>
+                  <li>previous feature current value: {lastPreviousFeatureCurrentValue || '-'}</li>
+                  <li>requested new option value: {lastRequestedOptionValue || '-'}</li>
+                  <li>returned feature current value after Configure: {lastReturnedFeatureCurrentValue || '-'}</li>
+                  <li>
+                    requested/returned mismatch:{' '}
+                    {lastRequestedOptionValue && lastReturnedFeatureCurrentValue && lastRequestedOptionValue !== lastReturnedFeatureCurrentValue
+                      ? '⚠️ yes'
+                      : 'no'}
+                  </li>
                   <li>extracted IPN Code: {state?.ipnCode ?? '-'}</li>
                   <li>IPN source: {state?.debug?.ipnCodeSource ?? '-'}</li>
                   <li>sessionId source: {state?.debug?.sessionIdField ?? '-'}</li>
