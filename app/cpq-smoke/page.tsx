@@ -1,7 +1,7 @@
 'use client';
 
 import { CSSProperties, useMemo, useState } from 'react';
-import { NormalizedBikeBuilderState } from '../../lib/cpq/types';
+import { BikeBuilderFeatureOption, NormalizedBikeBuilderState } from '../../lib/cpq/types';
 
 type InitResponse = {
   sessionId: string;
@@ -33,6 +33,18 @@ const preStyle: CSSProperties = {
 
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
 
+const responseSnippet = (value: unknown): string => {
+  const text = JSON.stringify(value);
+  if (!text) return '-';
+  return text.length > 1200 ? `${text.slice(0, 1200)}...` : text;
+};
+
+const getEffectiveSelection = (option: BikeBuilderFeatureOption): string => {
+  const optionId = option.optionId;
+  const optionValue = option.value ?? '';
+  return `${optionId}::${optionValue}`;
+};
+
 export default function CpqSmokePage() {
   const [ruleset, setRuleset] = useState(defaultRuleset);
   const [loading, setLoading] = useState(false);
@@ -41,12 +53,36 @@ export default function CpqSmokePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [state, setState] = useState<NormalizedBikeBuilderState | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+  const [showHidden, setShowHidden] = useState(false);
 
+  const [lastChangedFeatureId, setLastChangedFeatureId] = useState<string | null>(null);
+  const [lastChangedOptionId, setLastChangedOptionId] = useState<string | null>(null);
   const [lastConfigureRequest, setLastConfigureRequest] = useState<unknown>(null);
   const [lastConfigureResponse, setLastConfigureResponse] = useState<unknown>(null);
   const [lastInitResponse, setLastInitResponse] = useState<unknown>(null);
 
-  const hasFeatures = useMemo(() => (state?.features.length ?? 0) > 0, [state]);
+  const visibleFeatures = useMemo(
+    () => (state?.features ?? []).filter((feature) => feature.isVisible !== false),
+    [state],
+  );
+
+  const hiddenFeatures = useMemo(
+    () => (state?.features ?? []).filter((feature) => feature.isVisible === false),
+    [state],
+  );
+
+  const hasFeatures = useMemo(() => (visibleFeatures.length ?? 0) > 0, [visibleFeatures]);
+
+  const hydrateSelectionMap = (nextState: NormalizedBikeBuilderState): Record<string, string> => {
+    const nextSelected: Record<string, string> = {};
+    nextState.features.forEach((feature) => {
+      const selectedOption = feature.availableOptions.find((option) => option.selected);
+      if (selectedOption) {
+        nextSelected[feature.featureId] = getEffectiveSelection(selectedOption);
+      }
+    });
+    return nextSelected;
+  };
 
   const loadConfiguration = async () => {
     setLoading(true);
@@ -69,14 +105,9 @@ export default function CpqSmokePage() {
       setLastInitResponse(payload.rawResponse);
       setLastConfigureRequest(null);
       setLastConfigureResponse(null);
-
-      const nextSelected: Record<string, string> = {};
-      payload.parsed.features.forEach((feature) => {
-        if (feature.selectedOptionId) {
-          nextSelected[feature.featureId] = feature.selectedOptionId;
-        }
-      });
-      setSelectedOptions(nextSelected);
+      setLastChangedFeatureId(null);
+      setLastChangedOptionId(null);
+      setSelectedOptions(hydrateSelectionMap(payload.parsed));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -84,8 +115,16 @@ export default function CpqSmokePage() {
     }
   };
 
-  const configureSingleChange = async (featureId: string, optionId: string) => {
-    if (!sessionId) return;
+  const configureSingleChange = async (featureId: string, selectedKey: string) => {
+    if (!sessionId || !state) return;
+
+    const feature = state.features.find((candidate) => candidate.featureId === featureId);
+    const selectedOption = feature?.availableOptions.find((option) => getEffectiveSelection(option) === selectedKey);
+
+    if (!selectedOption) {
+      setError(`Could not resolve selected option for feature ${featureId}`);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -94,9 +133,12 @@ export default function CpqSmokePage() {
       sessionId,
       ruleset,
       featureId,
-      optionId,
+      optionId: selectedOption.optionId,
+      optionValue: selectedOption.value,
     };
 
+    setLastChangedFeatureId(featureId);
+    setLastChangedOptionId(selectedOption.optionId);
     setLastConfigureRequest(requestBody);
 
     try {
@@ -114,14 +156,7 @@ export default function CpqSmokePage() {
       setState(payload.parsed);
       setSessionId(payload.sessionId);
       setLastConfigureResponse(payload.rawResponse);
-
-      const nextSelected: Record<string, string> = {};
-      payload.parsed.features.forEach((feature) => {
-        if (feature.selectedOptionId) {
-          nextSelected[feature.featureId] = feature.selectedOptionId;
-        }
-      });
-      setSelectedOptions(nextSelected);
+      setSelectedOptions(hydrateSelectionMap(payload.parsed));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -165,21 +200,28 @@ export default function CpqSmokePage() {
             <strong>Price:</strong> {state.configuredPrice ?? '-'}
           </div>
 
-          <h2>Features / options</h2>
-          {!hasFeatures && <div>No features were parsed from StartConfiguration response.</div>}
+          <h2>Visible features / options</h2>
+          {!hasFeatures && <div>No visible features were parsed from CPQ response.</div>}
 
-          {state.features.map((feature) => (
+          {visibleFeatures.map((feature) => (
             <div key={feature.featureId} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 10 }}>
               <div>
-                <strong>{feature.featureLabel}</strong> ({feature.featureId})
+                <strong>{feature.featureLabel}</strong> ({feature.featureName ?? feature.featureId})
+              </div>
+              <div>
+                Current value: <code>{feature.currentValue ?? '-'}</code>
               </div>
               <select
-                value={selectedOptions[feature.featureId] ?? feature.selectedOptionId ?? ''}
-                disabled={loading || !sessionId}
+                value={selectedOptions[feature.featureId] ?? ''}
+                disabled={loading || !sessionId || feature.isEnabled === false}
                 onChange={(e) => configureSingleChange(feature.featureId, e.target.value)}
               >
                 {feature.availableOptions.map((option) => (
-                  <option key={option.optionId} value={option.optionId} disabled={option.isSelectable === false}>
+                  <option
+                    key={getEffectiveSelection(option)}
+                    value={getEffectiveSelection(option)}
+                    disabled={option.isEnabled === false || option.isVisible === false}
+                  >
                     {option.label}
                     {option.selected ? ' (selected)' : ''}
                   </option>
@@ -187,17 +229,62 @@ export default function CpqSmokePage() {
               </select>
             </div>
           ))}
+
+          <label>
+            <input type='checkbox' checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden/system
+            features in debug panel
+          </label>
+
+          {showHidden && hiddenFeatures.length > 0 && (
+            <details open>
+              <summary>Hidden/system features ({hiddenFeatures.length})</summary>
+              <pre style={preStyle}>{pretty(hiddenFeatures)}</pre>
+            </details>
+          )}
         </section>
       )}
 
       <details open>
-        <summary>Debug: selected options</summary>
-        <pre style={preStyle}>{pretty(selectedOptions)}</pre>
+        <summary>Debug: parser and request summary</summary>
+        <pre style={preStyle}>
+          {pretty({
+            extractedSessionId: state?.sessionId ?? sessionId,
+            sessionIdField: state?.debug?.sessionIdField,
+            parsedFeatureCount: state?.debug?.parsedFeatureCount ?? 0,
+            visibleFeatureCount: state?.debug?.visibleFeatureCount ?? 0,
+            hiddenFeatureCount: state?.debug?.hiddenFeatureCount ?? 0,
+            lastChangedFeatureId,
+            lastChangedOptionId,
+            lastConfigureRequestBody: lastConfigureRequest,
+            rawResponseSnippet: responseSnippet(lastConfigureResponse ?? lastInitResponse),
+          })}
+        </pre>
       </details>
 
-      <details open>
-        <summary>Debug: last Configure request body</summary>
-        <pre style={preStyle}>{pretty(lastConfigureRequest)}</pre>
+      <details>
+        <summary>Debug: feature/option identity view</summary>
+        <pre style={preStyle}>
+          {pretty(
+            (showHidden ? state?.features : visibleFeatures)?.map((feature) => ({
+              featureId: feature.featureId,
+              featureName: feature.featureName,
+              featureLabel: feature.featureLabel,
+              featureSequence: feature.featureSequence,
+              featureVisible: feature.isVisible,
+              featureEnabled: feature.isEnabled,
+              currentValue: feature.currentValue,
+              selectedOptionId: feature.selectedOptionId,
+              options: feature.availableOptions.map((option) => ({
+                optionId: option.optionId,
+                optionValue: option.value,
+                optionLabel: option.label,
+                selected: option.selected,
+                isVisible: option.isVisible,
+                isEnabled: option.isEnabled,
+              })),
+            })),
+          )}
+        </pre>
       </details>
 
       <details>

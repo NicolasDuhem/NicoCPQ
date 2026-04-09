@@ -5,20 +5,50 @@ export type BikeBuilderContext = {
   language?: string;
 };
 
+export type BikeBuilderOptionMetadata = {
+  FeatureID?: string;
+  FeatureQuestion?: string;
+  FeatureSequence?: number;
+  LongDescription?: string;
+  IPNCode?: string;
+  MSRP?: string;
+  Price?: string;
+  PriceOption?: string;
+  UnitWeight?: string;
+  ForecastAs?: string;
+  ShortDescription?: string;
+};
+
 export type BikeBuilderFeatureOption = {
   optionId: string;
   label: string;
   value?: string;
   isSelectable?: boolean;
   selected?: boolean;
+  isVisible?: boolean;
+  isEnabled?: boolean;
+  metadata?: BikeBuilderOptionMetadata;
 };
 
 export type BikeBuilderFeature = {
   featureId: string;
+  featureName?: string;
   featureLabel: string;
+  featureSequence?: number;
   selectedOptionId?: string;
   selectedValue?: string;
+  currentValue?: string;
+  displayType?: string;
+  isVisible?: boolean;
+  isEnabled?: boolean;
   availableOptions: BikeBuilderFeatureOption[];
+};
+
+export type CpqParsingDebug = {
+  sessionIdField?: string;
+  parsedFeatureCount: number;
+  visibleFeatureCount: number;
+  hiddenFeatureCount: number;
 };
 
 export type NormalizedBikeBuilderState = {
@@ -34,6 +64,7 @@ export type NormalizedBikeBuilderState = {
   bikeImageUrl?: string;
   selectedOptionIds?: string[];
   features: BikeBuilderFeature[];
+  debug?: CpqParsingDebug;
   raw?: unknown;
 };
 
@@ -46,6 +77,7 @@ export type ConfigureConfiguratorRequest = {
   sessionId: string;
   featureId: string;
   optionId: string;
+  optionValue?: string;
   ruleset?: string;
   context?: Partial<BikeBuilderContext>;
 };

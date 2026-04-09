@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     sessionId: body.sessionId,
     featureId: body.featureId,
     optionId: body.optionId,
+    optionValue: body.optionValue,
     context,
   });
 
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
         sessionId: body.sessionId,
         featureId: body.featureId,
         optionId: body.optionId,
+        optionValue: body.optionValue,
       },
     });
   }
@@ -67,6 +69,7 @@ export async function POST(req: NextRequest) {
         sessionId: body.sessionId,
         featureId: body.featureId,
         optionId: body.optionId,
+        optionValue: body.optionValue,
       },
     });
   } catch (error) {
