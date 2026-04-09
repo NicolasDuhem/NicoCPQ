@@ -8,7 +8,74 @@ type CpqRequestResult = {
   text?: string;
 };
 
+export type CpqRequestDebug = {
+  url: string;
+  method: 'POST';
+  headers: {
+    Authorization: string;
+    'Content-Type': string;
+    Accept: string;
+  };
+  body: unknown;
+  bodyText: string;
+};
+
+export type CpqResponseDebug = {
+  status: number;
+  ok: boolean;
+  statusText: string;
+  headers: Record<string, string>;
+  parsedJson?: CpqApiEnvelope;
+  rawText: string;
+};
+
+export type CpqConfigDebug = {
+  apiKeyPresent: boolean;
+  apiKeyPreview: string | null;
+  baseUrl: string;
+  instance: string;
+  profile: string;
+  namespace: string;
+  partName: string;
+  company: string;
+  currency: string;
+  customerLocation: string;
+  headerId: string;
+  detailId: string;
+};
+
+export type CpqSmokeDebugResult = {
+  requestDebug: CpqRequestDebug;
+  responseDebug: CpqResponseDebug;
+  configDebug: CpqConfigDebug;
+};
+
 const getBodySnippet = (text: string): string => text.replace(/\s+/g, ' ').slice(0, 400);
+
+const maskApiKey = (apiKey: string): string => {
+  if (!apiKey) return 'ApiKey ****';
+  const suffix = apiKey.slice(-4);
+  return `ApiKey ****${suffix}`;
+};
+
+const buildConfigDebug = (detailIdOverride?: string): CpqConfigDebug => {
+  const config = readCpqConfig();
+
+  return {
+    apiKeyPresent: Boolean(config.apiKey),
+    apiKeyPreview: config.apiKey ? `****${config.apiKey.slice(-4)}` : null,
+    baseUrl: config.baseUrl,
+    instance: config.defaults.instance,
+    profile: config.defaults.profile,
+    namespace: config.defaults.namespace,
+    partName: config.defaults.partName,
+    company: config.defaults.company,
+    currency: config.defaults.currency,
+    customerLocation: config.defaults.customerLocation,
+    headerId: config.defaults.headerId,
+    detailId: detailIdOverride ?? config.defaults.detailId,
+  };
+};
 
 const post = async (path: string, body: unknown, logPrefix: string): Promise<CpqRequestResult> => {
   const config = readCpqConfig();
@@ -61,6 +128,71 @@ const post = async (path: string, body: unknown, logPrefix: string): Promise<Cpq
 export const startConfigurationRaw = async (): Promise<CpqRequestResult> => {
   const payload = buildStartConfigurationPayload();
   return post('StartConfiguration', payload, '[cpq/start]');
+};
+
+export const startConfigurationSmokeDebug = async (detailId?: string): Promise<CpqSmokeDebugResult> => {
+  const config = readCpqConfig();
+  const endpoint = `${config.baseUrl}/StartConfiguration`;
+
+  const payload = buildStartConfigurationPayload(detailId);
+  const requestBodyText = JSON.stringify(payload);
+  const requestHeaders = {
+    Authorization: `ApiKey ${config.apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  } as const;
+
+  const requestDebug: CpqRequestDebug = {
+    url: endpoint,
+    method: 'POST',
+    headers: {
+      Authorization: maskApiKey(config.apiKey),
+      'Content-Type': requestHeaders['Content-Type'],
+      Accept: requestHeaders.Accept,
+    },
+    body: payload,
+    bodyText: requestBodyText,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: requestBodyText,
+      signal: controller.signal,
+    });
+
+    const responseText = await response.text();
+    let parsedJson: CpqApiEnvelope | undefined;
+    try {
+      parsedJson = JSON.parse(responseText) as CpqApiEnvelope;
+    } catch {
+      parsedJson = undefined;
+    }
+
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value;
+    });
+
+    return {
+      requestDebug,
+      responseDebug: {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        parsedJson,
+        rawText: responseText,
+      },
+      configDebug: buildConfigDebug(detailId),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 export const startConfiguration = async (

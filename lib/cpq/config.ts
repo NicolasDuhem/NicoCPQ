@@ -64,7 +64,7 @@ export const readCpqConfig = () => {
   };
 };
 
-export const buildStartConfigurationPayload = (): CpqStartConfigurationPayload => {
+export const buildStartConfigurationPayload = (detailIdOverride?: string): CpqStartConfigurationPayload => {
   const { defaults } = readCpqConfig();
 
   return {
@@ -82,7 +82,7 @@ export const buildStartConfigurationPayload = (): CpqStartConfigurationPayload =
       },
       headerDetail: {
         headerId: defaults.headerId,
-        detailId: defaults.detailId,
+        detailId: detailIdOverride ?? defaults.detailId,
       },
       sourceHeaderDetail: {
         headerId: '',

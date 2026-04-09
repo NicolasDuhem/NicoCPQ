@@ -1,15 +1,25 @@
-import { NextResponse } from 'next/server';
-import { startConfigurationRaw } from '../../../../lib/cpq/client';
+import { NextRequest, NextResponse } from 'next/server';
+import { startConfigurationSmokeDebug } from '../../../../lib/cpq/client';
 
-export async function POST() {
+const createDetailId = (): string => crypto.randomUUID();
+
+export async function POST(request: NextRequest) {
   try {
-    const result = await startConfigurationRaw();
+    const body = (await request.json().catch(() => ({}))) as { generateNewDetailId?: boolean; detailId?: string };
+    const requestedDetailId =
+      typeof body.detailId === 'string' && body.detailId.trim().length > 0
+        ? body.detailId.trim()
+        : body.generateNewDetailId
+          ? createDetailId()
+          : undefined;
+
+    const debug = await startConfigurationSmokeDebug(requestedDetailId);
 
     return NextResponse.json({
-      ok: result.ok,
-      upstreamStatus: result.status,
-      json: result.data,
-      text: result.data ? undefined : result.text,
+      ok: debug.responseDebug.ok,
+      requestDebug: debug.requestDebug,
+      responseDebug: debug.responseDebug,
+      configDebug: debug.configDebug,
     });
   } catch (error) {
     return NextResponse.json(
