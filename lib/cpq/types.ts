@@ -10,6 +10,7 @@ export type BikeBuilderFeatureOption = {
   label: string;
   value?: string;
   isSelectable?: boolean;
+  selected?: boolean;
 };
 
 export type BikeBuilderFeature = {
@@ -23,6 +24,9 @@ export type BikeBuilderFeature = {
 export type NormalizedBikeBuilderState = {
   sessionId: string;
   ruleset: string;
+  pages: Record<string, unknown>[];
+  screens: Record<string, unknown>[];
+  screenOptions: Record<string, unknown>[];
   productDescription?: string;
   ipnCode?: string;
   configuredPrice?: number;
@@ -40,9 +44,9 @@ export type InitConfiguratorRequest = {
 
 export type ConfigureConfiguratorRequest = {
   sessionId: string;
-  ruleset: string;
   featureId: string;
   optionId: string;
+  ruleset?: string;
   context?: Partial<BikeBuilderContext>;
 };
 

@@ -216,13 +216,21 @@ export const startConfiguration = async (
   return result.data;
 };
 
-export const configureSelection = async (
+export const configureConfiguration = async (
   request: ConfigureConfiguratorRequest,
   context: Record<string, unknown>,
 ): Promise<CpqApiEnvelope> => {
   const body = {
+    SessionId: request.sessionId,
     sessionId: request.sessionId,
-    ruleset: request.ruleset,
+    ConfigChanges: [
+      {
+        FeatureId: request.featureId,
+        OptionId: request.optionId,
+        featureId: request.featureId,
+        optionId: request.optionId,
+      },
+    ],
     changes: [
       {
         featureId: request.featureId,

@@ -3,6 +3,9 @@ import { NormalizedBikeBuilderState } from './types';
 export const mockInitState = (ruleset: string): NormalizedBikeBuilderState => ({
   sessionId: 'mock-session-1',
   ruleset,
+  pages: [],
+  screens: [],
+  screenOptions: [],
   productDescription: 'Brompton C Line Urban',
   ipnCode: 'IPN-MOCK-001',
   configuredPrice: 1450,
@@ -16,8 +19,8 @@ export const mockInitState = (ruleset: string): NormalizedBikeBuilderState => ({
       selectedOptionId: 'frame_black',
       selectedValue: 'Black',
       availableOptions: [
-        { optionId: 'frame_black', label: 'Black', isSelectable: true },
-        { optionId: 'frame_blue', label: 'Blue', isSelectable: true },
+        { optionId: 'frame_black', label: 'Black', isSelectable: true, selected: true },
+        { optionId: 'frame_blue', label: 'Blue', isSelectable: true, selected: false },
       ],
     },
     {
@@ -26,8 +29,8 @@ export const mockInitState = (ruleset: string): NormalizedBikeBuilderState => ({
       selectedOptionId: 'handlebar_mid',
       selectedValue: 'Mid',
       availableOptions: [
-        { optionId: 'handlebar_low', label: 'Low', isSelectable: true },
-        { optionId: 'handlebar_mid', label: 'Mid', isSelectable: true },
+        { optionId: 'handlebar_low', label: 'Low', isSelectable: true, selected: false },
+        { optionId: 'handlebar_mid', label: 'Mid', isSelectable: true, selected: true },
       ],
     },
   ],
@@ -48,6 +51,10 @@ export const mockConfigureState = (
       ...feature,
       selectedOptionId: optionId,
       selectedValue: selected?.label ?? optionId,
+      availableOptions: feature.availableOptions.map((option) => ({
+        ...option,
+        selected: option.optionId === optionId,
+      })),
     };
   });
 
