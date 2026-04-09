@@ -17,6 +17,7 @@ export type BikeBuilderOptionMetadata = {
   UnitWeight?: string;
   ForecastAs?: string;
   ShortDescription?: string;
+  OptionID?: string;
 };
 
 export type BikeBuilderFeatureOption = {
@@ -46,7 +47,8 @@ export type BikeBuilderFeature = {
 
 export type CpqParsingDebug = {
   sessionIdField?: string;
-  parsedFeatureCount: number;
+  rawFeatureCount: number;
+  dedupedFeatureCount: number;
   visibleFeatureCount: number;
   hiddenFeatureCount: number;
 };
@@ -64,12 +66,19 @@ export type NormalizedBikeBuilderState = {
   bikeImageUrl?: string;
   selectedOptionIds?: string[];
   features: BikeBuilderFeature[];
+  hiddenOrSystemFeatures?: BikeBuilderFeature[];
   debug?: CpqParsingDebug;
   raw?: unknown;
 };
 
 export type InitConfiguratorRequest = {
   ruleset: string;
+  namespace?: string;
+  partName?: string;
+  headerId?: string;
+  detailId?: string;
+  profile?: string;
+  instance?: string;
   context?: Partial<BikeBuilderContext>;
 };
 
