@@ -2,38 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { startConfiguration } from '../../../../lib/cpq/client';
 import { mapCpqToNormalizedState } from '../../../../lib/cpq/mappers';
 import { mockInitState } from '../../../../lib/cpq/mock-data';
-import { BikeBuilderContext, InitConfiguratorRequest } from '../../../../lib/cpq/types';
+import { InitConfiguratorRequest } from '../../../../lib/cpq/types';
 
-const defaultContext: BikeBuilderContext = {
-  accountCode: process.env.CPQ_DEFAULT_ACCOUNT_CODE ?? 'A000',
-  currency: process.env.CPQ_DEFAULT_CURRENCY ?? 'GBP',
-  language: process.env.CPQ_DEFAULT_LANGUAGE ?? 'en-GB',
-};
-
-const buildContext = (input?: Partial<BikeBuilderContext>) => ({
-  accountCode: input?.accountCode ?? defaultContext.accountCode,
-  customerId: input?.customerId ?? process.env.CPQ_DEFAULT_CUSTOMER_ID,
-  currency: input?.currency ?? defaultContext.currency,
-  language: input?.language ?? defaultContext.language,
-});
+/**
+ * NOTE FOR NEXT STEP (Configure flow):
+ * StartConfiguration responses must expose a stable session/configuration identifier
+ * (for example sessionId/SessionId/configurationId) that will be required in Configure requests.
+ * We also need the returned mutable state payload (often details/screens/options) to pass back.
+ */
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as InitConfiguratorRequest;
+  const body = (await req.json().catch(() => ({}))) as Partial<InitConfiguratorRequest>;
+  const ruleset = body.ruleset ?? process.env.NEXT_PUBLIC_CPQ_RULESET ?? 'BBLV6_G-LineMY26';
 
-  if (!body?.ruleset) {
-    return NextResponse.json({ error: 'ruleset is required' }, { status: 400 });
-  }
-
-  const context = buildContext(body.context);
-  console.log('[cpq/init] request', { ruleset: body.ruleset, context });
+  console.log('[cpq/init] request', {
+    ruleset,
+    notes: 'Using StartConfiguration inputParameters payload based on known working Postman request.',
+  });
 
   if (process.env.CPQ_USE_MOCK === 'true') {
-    return NextResponse.json(mockInitState(body.ruleset));
+    return NextResponse.json(mockInitState(ruleset));
   }
 
   try {
-    const cpqResponse = await startConfiguration(body, { context });
-    const normalized = mapCpqToNormalizedState(cpqResponse, body.ruleset);
+    const cpqResponse = await startConfiguration({ ruleset });
+    const normalized = mapCpqToNormalizedState(cpqResponse, ruleset);
+
     console.log('[cpq/init] response', {
       sessionId: normalized.sessionId,
       features: normalized.features.length,

@@ -1,74 +1,87 @@
-import { ConfigureConfiguratorRequest, CpqApiEnvelope, CpqClientConfig, InitConfiguratorRequest } from './types';
+import { buildStartConfigurationPayload, readCpqConfig } from './config';
+import { ConfigureConfiguratorRequest, CpqApiEnvelope, InitConfiguratorRequest } from './types';
 
-const requireEnv = (key: string): string => {
-  const value = process.env[key];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  return value;
+type CpqRequestResult = {
+  status: number;
+  ok: boolean;
+  data?: CpqApiEnvelope;
+  text?: string;
 };
 
-export const readCpqConfig = (): CpqClientConfig => ({
-  baseUrl: requireEnv('CPQ_BASE_URL'),
-  ionApiToken: process.env.CPQ_ION_API_TOKEN,
-  username: process.env.CPQ_USERNAME,
-  password: process.env.CPQ_PASSWORD,
-  timeoutMs: Number(process.env.CPQ_TIMEOUT_MS ?? 25000),
-});
+const getBodySnippet = (text: string): string => text.replace(/\s+/g, ' ').slice(0, 400);
 
-const buildHeaders = (config: CpqClientConfig): HeadersInit => {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-
-  if (config.ionApiToken) {
-    headers.Authorization = `Bearer ${config.ionApiToken}`;
-  } else if (config.username && config.password) {
-    const encoded = Buffer.from(`${config.username}:${config.password}`).toString('base64');
-    headers.Authorization = `Basic ${encoded}`;
-  }
-
-  return headers;
-};
-
-const post = async (path: string, body: unknown): Promise<CpqApiEnvelope> => {
+const post = async (path: string, body: unknown, logPrefix: string): Promise<CpqRequestResult> => {
   const config = readCpqConfig();
-  const endpoint = `${config.baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  const endpoint = `${config.baseUrl}/${path.replace(/^\//, '')}`;
+  const apiKeyPresent = Boolean(config.apiKey);
+
+  console.log(`${logPrefix} request`, {
+    url: endpoint,
+    apiKeyPresent,
+    apiKeyPreview: apiKeyPresent ? `${config.apiKey.slice(0, 4)}...` : undefined,
+  });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
 
   try {
-    const res = await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: buildHeaders(config),
+      headers: {
+        Authorization: `ApiKey ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
 
-    const payload = (await res.json()) as CpqApiEnvelope;
+    const responseText = await response.text();
+    console.log(`${logPrefix} response`, {
+      status: response.status,
+      bodySnippet: getBodySnippet(responseText),
+    });
 
-    if (!res.ok) {
-      throw new Error(`CPQ request failed (${res.status}): ${JSON.stringify(payload)}`);
+    try {
+      const parsed = JSON.parse(responseText) as CpqApiEnvelope;
+      return { status: response.status, ok: response.ok, data: parsed, text: responseText };
+    } catch {
+      return { status: response.status, ok: response.ok, text: responseText };
     }
-
-    return payload;
+  } catch (error) {
+    console.error(`${logPrefix} fetch failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   } finally {
     clearTimeout(timer);
   }
 };
 
-export const startConfiguration = async (
-  request: InitConfiguratorRequest,
-  context: Record<string, unknown>,
-): Promise<CpqApiEnvelope> => {
-  const body = {
-    ruleset: request.ruleset,
-    ...context,
-  };
+export const startConfigurationRaw = async (): Promise<CpqRequestResult> => {
+  const payload = buildStartConfigurationPayload();
+  return post('StartConfiguration', payload, '[cpq/start]');
+};
 
-  return post('startconfiguration', body);
+export const startConfiguration = async (
+  _request: InitConfiguratorRequest,
+  _context?: Record<string, unknown>,
+): Promise<CpqApiEnvelope> => {
+  const result = await startConfigurationRaw();
+
+  if (!result.ok) {
+    throw new Error(
+      `CPQ StartConfiguration failed (${result.status}): ${
+        result.data ? JSON.stringify(result.data) : result.text ?? 'No response body'
+      }`,
+    );
+  }
+
+  if (!result.data) {
+    throw new Error(`CPQ StartConfiguration returned non-JSON (${result.status}): ${result.text ?? ''}`);
+  }
+
+  return result.data;
 };
 
 export const configureSelection = async (
@@ -87,5 +100,13 @@ export const configureSelection = async (
     ...context,
   };
 
-  return post('configure', body);
+  const result = await post('Configure', body, '[cpq/configure]');
+
+  if (!result.ok || !result.data) {
+    throw new Error(
+      `CPQ Configure failed (${result.status}): ${result.data ? JSON.stringify(result.data) : result.text ?? 'No response body'}`,
+    );
+  }
+
+  return result.data;
 };
