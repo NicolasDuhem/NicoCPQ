@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
         optionId: body.optionId,
         optionValue: body.optionValue,
       },
+      callType: 'Configure',
     });
   }
 
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
         optionId: body.optionId,
         optionValue: body.optionValue,
       },
+      callType: 'Configure',
     });
   } catch (error) {
     console.error('[cpq/configure] failed', error);

@@ -6,7 +6,6 @@ const asArray = (value: unknown): Record<string, unknown>[] => {
 };
 
 const asString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
-
 const asBoolean = (value: unknown): boolean | undefined => (typeof value === 'boolean' ? value : undefined);
 
 const asNumber = (value: unknown): number | undefined => {
@@ -104,78 +103,118 @@ const findSessionId = (root: Record<string, unknown>): { value?: string; field?:
   return {};
 };
 
-const buildFeatures = (screenOptions: Record<string, unknown>[]): BikeBuilderFeature[] => {
-  return screenOptions
-    .map((screenOption, index) => {
-      const selectableValues = asArray(pick(screenOption, 'SelectableValues', 'selectableValues', 'Values', 'values'));
-      const currentValue = asString(pick(screenOption, 'Value', 'value'));
+type CandidateFeature = BikeBuilderFeature & {
+  stableFeatureKey: string;
+  traversalIndex: number;
+};
 
-      const options: BikeBuilderFeatureOption[] = selectableValues.map((selectable) => {
-        const customProperties = toCustomProperties(pick(selectable, 'CustomProperties', 'customProperties'));
+const optionFromSelectable = (selectable: Record<string, unknown>): BikeBuilderFeatureOption => {
+  const customProperties = toCustomProperties(pick(selectable, 'CustomProperties', 'customProperties'));
 
-        return {
-          optionId: customProperties.OptionID ?? asString(pick(selectable, 'OptionID', 'Id', 'ID', 'Value')) ?? 'unknown-option',
-          label: asString(pick(selectable, 'Caption', 'caption', 'Name', 'name', 'Value', 'value')) ?? 'Unknown option',
-          value: asString(pick(selectable, 'Value', 'value')),
-          isSelectable: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
-          isVisible: asBoolean(pick(selectable, 'IsVisible', 'isVisible')) ?? true,
-          isEnabled: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
-          metadata: {
-            FeatureID: customProperties.FeatureID,
-            FeatureQuestion: customProperties.FeatureQuestion,
-            FeatureSequence: asNumber(customProperties.FeatureSequence),
-            LongDescription: customProperties.LongDescription,
-            IPNCode: customProperties.IPNCode,
-            MSRP: customProperties.MSRP,
-            Price: customProperties.Price,
-            PriceOption: customProperties.PriceOption,
-            UnitWeight: customProperties.UnitWeight,
-            ForecastAs: customProperties.ForecastAs,
-            ShortDescription: customProperties.ShortDescription,
-          },
-        };
-      });
+  return {
+    optionId:
+      customProperties.OptionID ?? asString(pick(selectable, 'OptionID', 'optionId', 'Id', 'ID', 'Value')) ?? 'unknown-option',
+    label: asString(pick(selectable, 'Caption', 'caption', 'Name', 'name', 'Value', 'value')) ?? 'Unknown option',
+    value: asString(pick(selectable, 'Value', 'value')),
+    isSelectable: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
+    isVisible: asBoolean(pick(selectable, 'IsVisible', 'isVisible')) ?? true,
+    isEnabled: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
+    metadata: {
+      FeatureID: customProperties.FeatureID,
+      FeatureQuestion: customProperties.FeatureQuestion,
+      FeatureSequence: asNumber(customProperties.FeatureSequence),
+      LongDescription: customProperties.LongDescription,
+      IPNCode: customProperties.IPNCode,
+      MSRP: customProperties.MSRP,
+      Price: customProperties.Price,
+      PriceOption: customProperties.PriceOption,
+      UnitWeight: customProperties.UnitWeight,
+      ForecastAs: customProperties.ForecastAs,
+      ShortDescription: customProperties.ShortDescription,
+      OptionID: customProperties.OptionID,
+    },
+  };
+};
 
-      const exactMatch = options.find((option) => option.value !== undefined && option.value === currentValue);
-      const fallbackOption = options.find((option) => option.isVisible !== false && option.isEnabled !== false);
-      const selected = exactMatch ?? fallbackOption;
-      const selectedOptionId = selected?.optionId;
+const buildFeatureCandidate = (screenOption: Record<string, unknown>, traversalIndex: number): CandidateFeature => {
+  const selectableValues = asArray(pick(screenOption, 'SelectableValues', 'selectableValues', 'Values', 'values'));
+  const currentValue = asString(pick(screenOption, 'Value', 'value'));
+  const screenCustomProps = toCustomProperties(pick(screenOption, 'CustomProperties', 'customProperties'));
+  const options = selectableValues.map(optionFromSelectable);
 
-      const selectedOptions = options.map((option) => ({
-        ...option,
-        selected: Boolean(selectedOptionId && option.optionId === selectedOptionId),
-      }));
+  const exactMatch = options.find((option) => option.value !== undefined && option.value === currentValue);
+  const fallbackOption = options.find((option) => option.isVisible !== false && option.isEnabled !== false);
+  const selected = exactMatch ?? fallbackOption;
+  const selectedOptionId = selected?.optionId;
+  const selectedOptions = options.map((option) => ({ ...option, selected: Boolean(selectedOptionId && option.optionId === selectedOptionId) }));
 
-      const firstCustomProps = selectedOptions.find((opt) => opt.metadata)?.metadata;
-      const featureIdFromMeta = firstCustomProps?.FeatureID;
-      const featureQuestion = firstCustomProps?.FeatureQuestion;
-      const featureSequence = firstCustomProps?.FeatureSequence;
+  const firstMetadata = selectedOptions.find((opt) => opt.metadata)?.metadata;
+  const featureId = screenCustomProps.FeatureID ?? firstMetadata?.FeatureID ?? asString(pick(screenOption, 'ID', 'Id', 'id'));
+  const featureName = asString(pick(screenOption, 'Name', 'name'));
+  const stableFeatureKey = featureId ?? featureName ?? asString(pick(screenOption, 'ID', 'Id', 'id')) ?? `unknown-feature-${traversalIndex + 1}`;
 
-      return {
-        featureId: featureIdFromMeta ?? asString(pick(screenOption, 'ID', 'Id', 'id')) ?? `unknown-feature-${index + 1}`,
-        featureName: featureQuestion ?? asString(pick(screenOption, 'Name', 'name')),
-        featureLabel: asString(pick(screenOption, 'Caption', 'caption')) ?? asString(pick(screenOption, 'Name', 'name')) ?? 'Unknown feature',
-        featureSequence,
-        selectedOptionId,
-        selectedValue: selected?.value,
-        currentValue,
-        displayType: asString(pick(screenOption, 'DisplayType', 'displayType')),
-        isVisible: asBoolean(pick(screenOption, 'IsVisible', 'isVisible')) ?? true,
-        isEnabled: asBoolean(pick(screenOption, 'IsEnabled', 'isEnabled')) ?? true,
-        availableOptions: selectedOptions,
-        __index: index,
-      } as BikeBuilderFeature & { __index: number };
-    })
-    .sort((a, b) => {
-      const seqA = a.featureSequence;
-      const seqB = b.featureSequence;
+  return {
+    stableFeatureKey,
+    traversalIndex,
+    featureId: stableFeatureKey,
+    featureName,
+    featureLabel: asString(pick(screenOption, 'Caption', 'caption')) ?? featureName ?? 'Unknown feature',
+    featureSequence: firstMetadata?.FeatureSequence,
+    selectedOptionId,
+    selectedValue: selected?.value,
+    currentValue,
+    displayType: asString(pick(screenOption, 'DisplayType', 'displayType')),
+    isVisible: asBoolean(pick(screenOption, 'IsVisible', 'isVisible')) ?? true,
+    isEnabled: asBoolean(pick(screenOption, 'IsEnabled', 'isEnabled')) ?? true,
+    availableOptions: selectedOptions,
+  };
+};
 
-      if (seqA !== undefined && seqB !== undefined) return seqA - seqB;
-      if (seqA !== undefined) return -1;
-      if (seqB !== undefined) return 1;
-      return a.__index - b.__index;
-    })
-    .map(({ __index: _, ...feature }) => feature);
+const scoreFeatureCandidate = (feature: CandidateFeature): [number, number, number] => {
+  const visibleScore = feature.isVisible === false ? 0 : 1;
+  const optionCount = feature.availableOptions.length;
+  const firstSeenScore = -feature.traversalIndex;
+  return [visibleScore, optionCount, firstSeenScore];
+};
+
+const dedupeFeatureCandidates = (candidates: CandidateFeature[]) => {
+  const grouped = new Map<string, CandidateFeature[]>();
+
+  candidates.forEach((candidate) => {
+    const arr = grouped.get(candidate.stableFeatureKey) ?? [];
+    arr.push(candidate);
+    grouped.set(candidate.stableFeatureKey, arr);
+  });
+
+  const deduped: CandidateFeature[] = [];
+  const hiddenOrSystem: CandidateFeature[] = [];
+
+  for (const group of grouped.values()) {
+    const selected = [...group].sort((a, b) => {
+      const [aVisible, aOptions, aFirst] = scoreFeatureCandidate(a);
+      const [bVisible, bOptions, bFirst] = scoreFeatureCandidate(b);
+      if (aVisible !== bVisible) return bVisible - aVisible;
+      if (aOptions !== bOptions) return bOptions - aOptions;
+      return bFirst - aFirst;
+    })[0];
+
+    deduped.push(selected);
+    group.forEach((candidate) => {
+      if (candidate !== selected || candidate.isVisible === false) hiddenOrSystem.push(candidate);
+    });
+  }
+
+  const sortBySequence = (a: CandidateFeature, b: CandidateFeature) => {
+    if (a.featureSequence !== undefined && b.featureSequence !== undefined) return a.featureSequence - b.featureSequence;
+    if (a.featureSequence !== undefined) return -1;
+    if (b.featureSequence !== undefined) return 1;
+    return a.traversalIndex - b.traversalIndex;
+  };
+
+  return {
+    deduped: deduped.sort(sortBySequence),
+    hiddenOrSystem: hiddenOrSystem.sort(sortBySequence),
+  };
 };
 
 export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string): NormalizedBikeBuilderState => {
@@ -193,10 +232,10 @@ export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string
       ? [...screenOptionsFromPages, ...screenOptionsFromScreens]
       : flattenRecords(root, (key) => key.toLowerCase() === 'screenoptions');
 
-  const features = buildFeatures(screenOptions);
+  const rawCandidates = screenOptions.map((screenOption, index) => buildFeatureCandidate(screenOption, index));
+  const { deduped, hiddenOrSystem } = dedupeFeatureCandidates(rawCandidates);
+  const visibleFeatures = deduped.filter((feature) => feature.isVisible !== false);
   const session = findSessionId(root);
-
-  const visibleFeatureCount = features.filter((feature) => feature.isVisible !== false).length;
 
   return {
     sessionId: session.value ?? 'unknown-session',
@@ -209,15 +248,15 @@ export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string
     configuredPrice: asNumber(pick(root, 'configuredPrice', 'price', 'netPrice', 'Price')),
     totalWeight: asNumber(pick(root, 'totalWeight', 'weight', 'Weight')),
     bikeImageUrl: asString(pick(root, 'bikeImageUrl', 'imageUrl', 'ImageUrl')),
-    selectedOptionIds: features
-      .map((feature) => feature.selectedOptionId)
-      .filter((id): id is string => Boolean(id)),
-    features,
+    selectedOptionIds: visibleFeatures.map((feature) => feature.selectedOptionId).filter((id): id is string => Boolean(id)),
+    features: visibleFeatures,
+    hiddenOrSystemFeatures: hiddenOrSystem,
     debug: {
       sessionIdField: session.field,
-      parsedFeatureCount: features.length,
-      visibleFeatureCount,
-      hiddenFeatureCount: features.length - visibleFeatureCount,
+      rawFeatureCount: rawCandidates.length,
+      dedupedFeatureCount: deduped.length,
+      visibleFeatureCount: visibleFeatures.length,
+      hiddenFeatureCount: hiddenOrSystem.length,
     },
     raw: payload,
   };

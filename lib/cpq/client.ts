@@ -1,4 +1,4 @@
-import { buildStartConfigurationPayload, readCpqConfig } from './config';
+import { buildStartConfigurationPayload, readCpqConfig, StartConfigurationOverrides } from './config';
 import { ConfigureConfiguratorRequest, CpqApiEnvelope, InitConfiguratorRequest } from './types';
 
 type CpqRequestResult = {
@@ -58,7 +58,7 @@ const maskApiKey = (apiKey: string): string => {
   return `ApiKey ****${suffix}`;
 };
 
-const buildConfigDebug = (detailIdOverride?: string): CpqConfigDebug => {
+const buildConfigDebug = (overrides?: StartConfigurationOverrides): CpqConfigDebug => {
   const config = readCpqConfig();
 
   return {
@@ -67,13 +67,13 @@ const buildConfigDebug = (detailIdOverride?: string): CpqConfigDebug => {
     baseUrl: config.baseUrl,
     instance: config.defaults.instance,
     profile: config.defaults.profile,
-    namespace: config.defaults.namespace,
-    partName: config.defaults.partName,
+    namespace: overrides?.namespace ?? config.defaults.namespace,
+    partName: overrides?.partName ?? config.defaults.partName,
     company: config.defaults.company,
     currency: config.defaults.currency,
     customerLocation: config.defaults.customerLocation,
-    headerId: config.defaults.headerId,
-    detailId: detailIdOverride ?? config.defaults.detailId,
+    headerId: overrides?.headerId ?? config.defaults.headerId,
+    detailId: overrides?.detailId ?? config.defaults.detailId,
   };
 };
 
@@ -125,16 +125,16 @@ const post = async (path: string, body: unknown, logPrefix: string): Promise<Cpq
   }
 };
 
-export const startConfigurationRaw = async (): Promise<CpqRequestResult> => {
-  const payload = buildStartConfigurationPayload();
+export const startConfigurationRaw = async (overrides?: StartConfigurationOverrides): Promise<CpqRequestResult> => {
+  const payload = buildStartConfigurationPayload(overrides);
   return post('StartConfiguration', payload, '[cpq/start]');
 };
 
-export const startConfigurationSmokeDebug = async (detailId?: string): Promise<CpqSmokeDebugResult> => {
+export const startConfigurationSmokeDebug = async (overrides?: StartConfigurationOverrides): Promise<CpqSmokeDebugResult> => {
   const config = readCpqConfig();
   const endpoint = `${config.baseUrl}/StartConfiguration`;
 
-  const payload = buildStartConfigurationPayload(detailId);
+  const payload = buildStartConfigurationPayload(overrides);
   const requestBodyText = JSON.stringify(payload);
   const requestHeaders = {
     Authorization: `ApiKey ${config.apiKey}`,
@@ -188,7 +188,7 @@ export const startConfigurationSmokeDebug = async (detailId?: string): Promise<C
         parsedJson,
         rawText: responseText,
       },
-      configDebug: buildConfigDebug(detailId),
+      configDebug: buildConfigDebug(overrides),
     };
   } finally {
     clearTimeout(timer);
@@ -196,10 +196,17 @@ export const startConfigurationSmokeDebug = async (detailId?: string): Promise<C
 };
 
 export const startConfiguration = async (
-  _request: InitConfiguratorRequest,
+  request: InitConfiguratorRequest,
   _context?: Record<string, unknown>,
 ): Promise<CpqApiEnvelope> => {
-  const result = await startConfigurationRaw();
+  const result = await startConfigurationRaw({
+    namespace: request.namespace,
+    partName: request.partName || request.ruleset,
+    headerId: request.headerId,
+    detailId: request.detailId,
+    profile: request.profile,
+    instance: request.instance,
+  });
 
   if (!result.ok) {
     throw new Error(

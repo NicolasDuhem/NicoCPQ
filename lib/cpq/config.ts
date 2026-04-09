@@ -29,6 +29,15 @@ export type CpqStartConfigurationPayload = {
   };
 };
 
+export type StartConfigurationOverrides = {
+  namespace?: string;
+  partName?: string;
+  headerId?: string;
+  detailId?: string;
+  profile?: string;
+  instance?: string;
+};
+
 const requireEnv = (key: string): string => {
   const value = process.env[key];
   if (!value) {
@@ -64,25 +73,31 @@ export const readCpqConfig = () => {
   };
 };
 
-export const buildStartConfigurationPayload = (detailIdOverride?: string): CpqStartConfigurationPayload => {
+export const buildStartConfigurationPayload = (overrides?: StartConfigurationOverrides): CpqStartConfigurationPayload => {
   const { defaults } = readCpqConfig();
+  const namespace = overrides?.namespace ?? defaults.namespace;
+  const partName = overrides?.partName ?? defaults.partName;
+  const headerId = overrides?.headerId ?? defaults.headerId;
+  const detailId = overrides?.detailId ?? defaults.detailId;
+  const profile = overrides?.profile ?? defaults.profile;
+  const instance = overrides?.instance ?? defaults.instance;
 
   return {
     inputParameters: {
       mode: 0,
-      profile: defaults.profile,
+      profile,
       variantKey: null,
       application: {
-        instance: defaults.instance,
-        name: defaults.instance,
+        instance,
+        name: instance,
       },
       part: {
-        namespace: defaults.namespace,
-        name: defaults.partName,
+        namespace,
+        name: partName,
       },
       headerDetail: {
-        headerId: defaults.headerId,
-        detailId: detailIdOverride ?? defaults.detailId,
+        headerId,
+        detailId,
       },
       sourceHeaderDetail: {
         headerId: '',
