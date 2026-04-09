@@ -1,4 +1,4 @@
-import { CpqApiEnvelope, NormalizedBikeBuilderState } from './types';
+import { BikeBuilderFeature, BikeBuilderFeatureOption, CpqApiEnvelope, NormalizedBikeBuilderState } from './types';
 
 const asArray = (value: unknown): Record<string, unknown>[] => {
   if (!Array.isArray(value)) return [];
@@ -6,6 +6,8 @@ const asArray = (value: unknown): Record<string, unknown>[] => {
 };
 
 const asString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+
+const asBoolean = (value: unknown): boolean | undefined => (typeof value === 'boolean' ? value : undefined);
 
 const asNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number') return value;
@@ -50,54 +52,154 @@ const flattenRecords = (value: unknown, matches: (key: string) => boolean): Reco
   return results;
 };
 
-export const mapCpqToNormalizedState = (
-  payload: CpqApiEnvelope,
-  ruleset: string,
-): NormalizedBikeBuilderState => {
+const toCustomProperties = (value: unknown): Record<string, string> => {
+  const record = asRecord(value);
+  if (!record) return {};
+
+  return Object.entries(record).reduce<Record<string, string>>((acc, [key, val]) => {
+    if (typeof val === 'string') acc[key] = val;
+    else if (typeof val === 'number' || typeof val === 'boolean') acc[key] = String(val);
+    return acc;
+  }, {});
+};
+
+const findSessionId = (root: Record<string, unknown>): { value?: string; field?: string } => {
+  const directCandidates: Array<[string, unknown]> = [
+    ['SessionId', pick(root, 'SessionId', 'sessionId')],
+    ['ConfigurationSessionId', pick(root, 'ConfigurationSessionId', 'configurationSessionId')],
+    ['DetailId', pick(root, 'DetailId', 'detailId')],
+    ['ConfigurationId', pick(root, 'ConfigurationId', 'configurationId')],
+  ];
+
+  for (const [field, value] of directCandidates) {
+    const cast = asString(value);
+    if (cast) return { value: cast, field };
+  }
+
+  const queue: Array<{ path: string; value: unknown }> = [{ path: 'root', value: root }];
+  const preferredKeys = new Set(['sessionid', 'detailid', 'configurationsessionid', 'configurationid']);
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    if (Array.isArray(current.value)) {
+      current.value.forEach((child, idx) => queue.push({ path: `${current.path}[${idx}]`, value: child }));
+      continue;
+    }
+
+    const record = asRecord(current.value);
+    if (!record) continue;
+
+    for (const [key, val] of Object.entries(record)) {
+      const keyNormalized = key.toLowerCase();
+      if (preferredKeys.has(keyNormalized)) {
+        const cast = asString(val);
+        if (cast) return { value: cast, field: `${current.path}.${key}` };
+      }
+      queue.push({ path: `${current.path}.${key}`, value: val });
+    }
+  }
+
+  return {};
+};
+
+const buildFeatures = (screenOptions: Record<string, unknown>[]): BikeBuilderFeature[] => {
+  return screenOptions
+    .map((screenOption, index) => {
+      const selectableValues = asArray(pick(screenOption, 'SelectableValues', 'selectableValues', 'Values', 'values'));
+      const currentValue = asString(pick(screenOption, 'Value', 'value'));
+
+      const options: BikeBuilderFeatureOption[] = selectableValues.map((selectable) => {
+        const customProperties = toCustomProperties(pick(selectable, 'CustomProperties', 'customProperties'));
+
+        return {
+          optionId: customProperties.OptionID ?? asString(pick(selectable, 'OptionID', 'Id', 'ID', 'Value')) ?? 'unknown-option',
+          label: asString(pick(selectable, 'Caption', 'caption', 'Name', 'name', 'Value', 'value')) ?? 'Unknown option',
+          value: asString(pick(selectable, 'Value', 'value')),
+          isSelectable: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
+          isVisible: asBoolean(pick(selectable, 'IsVisible', 'isVisible')) ?? true,
+          isEnabled: asBoolean(pick(selectable, 'IsEnabled', 'isEnabled')) ?? true,
+          metadata: {
+            FeatureID: customProperties.FeatureID,
+            FeatureQuestion: customProperties.FeatureQuestion,
+            FeatureSequence: asNumber(customProperties.FeatureSequence),
+            LongDescription: customProperties.LongDescription,
+            IPNCode: customProperties.IPNCode,
+            MSRP: customProperties.MSRP,
+            Price: customProperties.Price,
+            PriceOption: customProperties.PriceOption,
+            UnitWeight: customProperties.UnitWeight,
+            ForecastAs: customProperties.ForecastAs,
+            ShortDescription: customProperties.ShortDescription,
+          },
+        };
+      });
+
+      const exactMatch = options.find((option) => option.value !== undefined && option.value === currentValue);
+      const fallbackOption = options.find((option) => option.isVisible !== false && option.isEnabled !== false);
+      const selected = exactMatch ?? fallbackOption;
+      const selectedOptionId = selected?.optionId;
+
+      const selectedOptions = options.map((option) => ({
+        ...option,
+        selected: Boolean(selectedOptionId && option.optionId === selectedOptionId),
+      }));
+
+      const firstCustomProps = selectedOptions.find((opt) => opt.metadata)?.metadata;
+      const featureIdFromMeta = firstCustomProps?.FeatureID;
+      const featureQuestion = firstCustomProps?.FeatureQuestion;
+      const featureSequence = firstCustomProps?.FeatureSequence;
+
+      return {
+        featureId: featureIdFromMeta ?? asString(pick(screenOption, 'ID', 'Id', 'id')) ?? `unknown-feature-${index + 1}`,
+        featureName: featureQuestion ?? asString(pick(screenOption, 'Name', 'name')),
+        featureLabel: asString(pick(screenOption, 'Caption', 'caption')) ?? asString(pick(screenOption, 'Name', 'name')) ?? 'Unknown feature',
+        featureSequence,
+        selectedOptionId,
+        selectedValue: selected?.value,
+        currentValue,
+        displayType: asString(pick(screenOption, 'DisplayType', 'displayType')),
+        isVisible: asBoolean(pick(screenOption, 'IsVisible', 'isVisible')) ?? true,
+        isEnabled: asBoolean(pick(screenOption, 'IsEnabled', 'isEnabled')) ?? true,
+        availableOptions: selectedOptions,
+        __index: index,
+      } as BikeBuilderFeature & { __index: number };
+    })
+    .sort((a, b) => {
+      const seqA = a.featureSequence;
+      const seqB = b.featureSequence;
+
+      if (seqA !== undefined && seqB !== undefined) return seqA - seqB;
+      if (seqA !== undefined) return -1;
+      if (seqB !== undefined) return 1;
+      return a.__index - b.__index;
+    })
+    .map(({ __index: _, ...feature }) => feature);
+};
+
+export const mapCpqToNormalizedState = (payload: CpqApiEnvelope, ruleset: string): NormalizedBikeBuilderState => {
   const root = payload as Record<string, unknown>;
   const pages = flattenRecords(root, (key) => key.toLowerCase() === 'pages');
   const screens = flattenRecords(root, (key) => key.toLowerCase() === 'screens');
-  const screenOptions = flattenRecords(root, (key) => {
-    const normalized = key.toLowerCase();
-    return normalized === 'screenoptions' || normalized === 'options' || normalized === 'values';
-  });
 
-  const featureRowsFromPages = pages.flatMap((page) => asArray(pick(page, 'screens', 'Screens')));
-  const featureRowsFromScreens = [...featureRowsFromPages, ...screens].flatMap((screen) =>
-    asArray(pick(screen, 'screenOptions', 'options', 'values', 'Values', 'ScreenOptions')),
+  const screenOptionsFromScreens = screens.flatMap((screen) => asArray(pick(screen, 'ScreenOptions', 'screenOptions')));
+  const screenOptionsFromPages = pages.flatMap((page) =>
+    asArray(pick(page, 'Screens', 'screens')).flatMap((screen) => asArray(pick(screen, 'ScreenOptions', 'screenOptions'))),
   );
 
-  const featureRows = featureRowsFromScreens.length
-    ? featureRowsFromScreens
-    : asArray(pick(root, 'features', 'FeatureList', 'optionFeatures', 'screenOptions'));
+  const screenOptions =
+    screenOptionsFromPages.length || screenOptionsFromScreens.length
+      ? [...screenOptionsFromPages, ...screenOptionsFromScreens]
+      : flattenRecords(root, (key) => key.toLowerCase() === 'screenoptions');
 
-  const features = featureRows.map((feature) => {
-    const optionRows = asArray(pick(feature, 'availableOptions', 'options', 'Values'));
-    const selectedOptionId = asString(pick(feature, 'selectedOptionId', 'selected', 'SelectedValueId'));
+  const features = buildFeatures(screenOptions);
+  const session = findSessionId(root);
 
-    return {
-      featureId: asString(pick(feature, 'featureId', 'id', 'name', 'FeatureId')) ?? 'unknown-feature',
-      featureLabel: asString(pick(feature, 'featureLabel', 'label', 'displayName', 'Description')) ?? 'Unknown feature',
-      selectedOptionId,
-      selectedValue: asString(pick(feature, 'selectedValue', 'SelectedValue', 'selectedLabel')),
-      availableOptions: optionRows.map((option) => ({
-        optionId: asString(pick(option, 'optionId', 'id', 'value', 'ValueId')) ?? 'unknown-option',
-        label: asString(pick(option, 'label', 'description', 'DisplayName', 'value')) ?? 'Unknown option',
-        value: asString(pick(option, 'value', 'code')),
-        isSelectable: (pick(option, 'isSelectable', 'enabled') as boolean | undefined) ?? true,
-        selected:
-          (pick(option, 'selected', 'isSelected') as boolean | undefined) ??
-          (selectedOptionId ? selectedOptionId === asString(pick(option, 'optionId', 'id', 'value', 'ValueId')) : false),
-      })),
-    };
-  });
+  const visibleFeatureCount = features.filter((feature) => feature.isVisible !== false).length;
 
   return {
-    sessionId:
-      asString(pick(root, 'sessionId', 'configurationId', 'SessionId')) ??
-      asString(pick(root, 'Session', 'session')) ??
-      asString(pick(root, 'id')) ??
-      'unknown-session',
+    sessionId: session.value ?? 'unknown-session',
     ruleset,
     pages,
     screens,
@@ -111,6 +213,12 @@ export const mapCpqToNormalizedState = (
       .map((feature) => feature.selectedOptionId)
       .filter((id): id is string => Boolean(id)),
     features,
+    debug: {
+      sessionIdField: session.field,
+      parsedFeatureCount: features.length,
+      visibleFeatureCount,
+      hiddenFeatureCount: features.length - visibleFeatureCount,
+    },
     raw: payload,
   };
 };

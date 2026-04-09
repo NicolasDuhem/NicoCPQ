@@ -227,14 +227,17 @@ export const configureConfiguration = async (
       {
         FeatureId: request.featureId,
         OptionId: request.optionId,
+        OptionValue: request.optionValue,
         featureId: request.featureId,
         optionId: request.optionId,
+        optionValue: request.optionValue,
       },
     ],
     changes: [
       {
         featureId: request.featureId,
         optionId: request.optionId,
+        optionValue: request.optionValue,
       },
     ],
     ...context,
